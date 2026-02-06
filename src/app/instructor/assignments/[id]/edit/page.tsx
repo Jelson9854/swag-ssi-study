@@ -7,9 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import dynamic from 'next/dynamic';
 import DeleteAssignmentButton from '../DeleteAssignmentButton';
-import InstructionEditor from '@/components/editor/InstructionEditor';
 import { ChevronLeft, Save, Globe, Brain, FileText } from 'lucide-react';
+
+const InstructionEditor = dynamic(
+  () => import('@/components/editor/InstructionEditor'),
+  { ssr: false, loading: () => <div className="p-4 text-[hsl(var(--muted-foreground))]">Loading editor...</div> }
+);
 
 interface Assignment {
   id: string;
@@ -251,7 +256,7 @@ export default function EditAssignmentPage() {
                 <p className="text-sm text-[hsl(var(--muted-foreground))] ml-7">
                   Allows students to use real-time web search during their writing session.
                   <br />
-                  <span className="text-[hsl(var(--destuctive))] opacity-80 text-xs font-semibold mt-1 block">
+                  <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
                     Recommended only if external research is required.
                   </span>
                 </p>

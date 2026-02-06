@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "2mb",
     },
+    optimizePackageImports: ['lucide-react', '@headlessui/react'],
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {

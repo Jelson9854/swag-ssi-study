@@ -1,7 +1,7 @@
 import { db } from '@/db/db';
-import { assignments, instructors, studentSessions } from '@/db/schema';
-import { eq, desc, count } from 'drizzle-orm';
-import { cookies, headers } from 'next/headers';
+import { assignments, studentSessions } from '@/db/schema';
+import { eq, desc, count, sql } from 'drizzle-orm';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import CopyLinkButton from '@/components/instructor/CopyLinkButton';
@@ -9,25 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
 import { Plus, Users, Calendar, Edit2 } from 'lucide-react';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || user.role !== 'instructor') {
-    return null;
-  }
-
-  return user;
-}
+import { getInstructor } from '@/lib/auth';
 
 export default async function DashboardPage() {
   const instructor = await getInstructor();
@@ -36,40 +18,46 @@ export default async function DashboardPage() {
     redirect('/login');
   }
 
-  const requestHeaders = await headers();
+  // Parallelize independent queries
+  const [requestHeaders, instructorAssignments] = await Promise.all([
+    headers(),
+    db
+      .select({
+        id: assignments.id,
+        title: assignments.title,
+        deadline: assignments.deadline,
+        shareToken: assignments.shareToken,
+        createdAt: assignments.createdAt,
+      })
+      .from(assignments)
+      .where(eq(assignments.instructorId, instructor.id))
+      .orderBy(desc(assignments.createdAt)),
+  ]);
+
   const forwardedProto = requestHeaders.get('x-forwarded-proto') ?? 'http';
   const forwardedHost = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host');
   const baseUrl = forwardedHost
     ? `${forwardedProto}://${forwardedHost}`
     : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
 
-  // Get instructor's assignments with student counts
-  const instructorAssignments = await db
-    .select({
-      id: assignments.id,
-      title: assignments.title,
-      deadline: assignments.deadline,
-      shareToken: assignments.shareToken,
-      createdAt: assignments.createdAt,
-    })
-    .from(assignments)
-    .where(eq(assignments.instructorId, instructor.id))
-    .orderBy(desc(assignments.createdAt));
-
-  // Get student counts for each assignment
-  const assignmentWithCounts = await Promise.all(
-    instructorAssignments.map(async (assignment) => {
-      const [result] = await db
-        .select({ count: count() })
+  // Single aggregate query instead of N+1
+  const assignmentIds = instructorAssignments.map(a => a.id);
+  const studentCounts = assignmentIds.length > 0
+    ? await db
+        .select({
+          assignmentId: studentSessions.assignmentId,
+          count: count(),
+        })
         .from(studentSessions)
-        .where(eq(studentSessions.assignmentId, assignment.id));
+        .where(sql`${studentSessions.assignmentId} IN ${assignmentIds}`)
+        .groupBy(studentSessions.assignmentId)
+    : [];
 
-      return {
-        ...assignment,
-        studentCount: result?.count || 0,
-      };
-    })
-  );
+  const countMap = new Map(studentCounts.map(sc => [sc.assignmentId, sc.count]));
+  const assignmentWithCounts = instructorAssignments.map(assignment => ({
+    ...assignment,
+    studentCount: countMap.get(assignment.id) || 0,
+  }));
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">

@@ -7,7 +7,7 @@ import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
 import { EventTracker } from "@/lib/event-tracker";
 import { getGlobalValidator } from "@/lib/copy-validator";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
 interface BlockNoteEditorProps {
   sessionId: string;
@@ -262,14 +262,6 @@ export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
 
   return (
     <div className="blocknote-wrapper">
-      <Toaster
-        toastOptions={{
-          className: '',
-          style: {
-            cursor: 'pointer',
-          },
-        }}
-      />
       <BlockNoteView
         editor={editor}
         theme="light"

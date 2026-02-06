@@ -1,31 +1,12 @@
 import { db } from '@/db/db';
-import { studentSessions, assignments, instructors, editorEvents, chatConversations, chatMessages } from '@/db/schema';
-import { eq, and, asc } from 'drizzle-orm';
-import { cookies } from 'next/headers';
+import { studentSessions, assignments, editorEvents, chatConversations, chatMessages } from '@/db/schema';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, FileText } from 'lucide-react';
 import ReplayClient from './ReplayClient';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || user.role !== 'instructor') {
-    return null;
-  }
-
-  return user;
-}
+import { getInstructor } from '@/lib/auth';
 
 interface PageProps {
   params: Promise<{ sessionId: string }>;
@@ -60,40 +41,37 @@ export default async function ReplayPage({ params }: PageProps) {
     notFound();
   }
 
-  // Get all editor events
-  const events = await db
-    .select()
-    .from(editorEvents)
-    .where(eq(editorEvents.sessionId, sessionId))
-    .orderBy(asc(editorEvents.sequenceNumber));
+  // Parallelize independent queries: events + conversations
+  const [events, conversations] = await Promise.all([
+    db
+      .select()
+      .from(editorEvents)
+      .where(eq(editorEvents.sessionId, sessionId))
+      .orderBy(asc(editorEvents.sequenceNumber)),
+    db
+      .select()
+      .from(chatConversations)
+      .where(eq(chatConversations.sessionId, sessionId))
+      .orderBy(asc(chatConversations.createdAt)),
+  ]);
 
-  // Get all chat conversations and messages
-  const conversations = await db
-    .select()
-    .from(chatConversations)
-    .where(eq(chatConversations.sessionId, sessionId))
-    .orderBy(asc(chatConversations.createdAt));
-
-  // Get all messages for all conversations
-  const allMessages = await Promise.all(
-    conversations.map(async (conv) => {
-      const msgs = await db
+  // Single query for all messages using IN clause instead of N+1
+  const conversationIds = conversations.map(c => c.id);
+  const allMsgs = conversationIds.length > 0
+    ? await db
         .select()
         .from(chatMessages)
-        .where(eq(chatMessages.conversationId, conv.id))
-        .orderBy(asc(chatMessages.timestamp));
-      return { conversationId: conv.id, messages: msgs };
-    })
-  );
+        .where(inArray(chatMessages.conversationId, conversationIds))
+        .orderBy(asc(chatMessages.timestamp))
+    : [];
 
   // Flatten messages with conversation info
-  const flatMessages = allMessages.flatMap(({ conversationId, messages }) =>
-    messages.map((msg) => ({
-      ...msg,
-      conversationId,
-      conversationTitle: conversations.find(c => c.id === conversationId)?.title || 'Chat',
-    }))
-  );
+  const convTitleMap = new Map(conversations.map(c => [c.id, c.title]));
+  const flatMessages = allMsgs.map(msg => ({
+    ...msg,
+    conversationId: msg.conversationId,
+    conversationTitle: convTitleMap.get(msg.conversationId) || 'Chat',
+  }));
 
   // Calculate timeline boundaries (start at first recorded event if available)
   const firstEditorEventTime = events.length > 0

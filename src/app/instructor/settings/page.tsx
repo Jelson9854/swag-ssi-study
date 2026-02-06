@@ -1,30 +1,8 @@
-import { db } from '@/db/db';
-import { instructors } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import BackLink from '@/components/ui/BackLink';
 import DeleteAccountButton from './DeleteAccountButton';
-import { Button } from '@headlessui/react';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || user.role !== 'instructor') {
-    return null;
-  }
-
-  return user;
-}
+import { Button } from '@/components/ui/button';
+import { getInstructor } from '@/lib/auth';
 
 export default async function SettingsPage() {
   const instructor = await getInstructor();
@@ -34,21 +12,22 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[hsl(var(--background))]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">SWAG</h1>
-              <p className="text-sm text-gray-600">Account Settings</p>
+              <h1 className="text-2xl font-bold font-heading text-[hsl(var(--foreground))]">SWAG</h1>
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">Account Settings</p>
             </div>
             <div className="flex items-center gap-4">
               <BackLink href="/instructor/dashboard" label="Back to Dashboard" />
               <form action="/api/auth/logout" method="POST">
                 <Button
                   type="submit"
-                  className="text-sm text-red-600 hover:text-red-800 font-medium"
+                  variant="ghost"
+                  className="text-sm text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))] font-medium"
                 >
                   Logout
                 </Button>
@@ -62,38 +41,38 @@ export default async function SettingsPage() {
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
           {/* Account Information */}
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          <div className="bg-[hsl(var(--card))] rounded-lg border border-[hsl(var(--border))] p-6">
+            <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-4">
               Account Information
             </h2>
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium text-gray-500">Email</label>
-                <p className="text-gray-900">{instructor.email}</p>
+                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Email</label>
+                <p className="text-[hsl(var(--foreground))]">{instructor.email}</p>
               </div>
               {(instructor.firstName || instructor.lastName) && (
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Name</label>
-                  <p className="text-gray-900">{`${instructor.firstName || ''} ${instructor.lastName || ''}`.trim()}</p>
+                  <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Name</label>
+                  <p className="text-[hsl(var(--foreground))]">{`${instructor.firstName || ''} ${instructor.lastName || ''}`.trim()}</p>
                 </div>
               )}
               <div>
-                <label className="text-sm font-medium text-gray-500">Account Status</label>
-                <p className="text-gray-900">
+                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Account Status</label>
+                <p className="text-[hsl(var(--foreground))]">
                   {instructor.isVerified ? (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
                       Verified
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
                       Pending Verification
                     </span>
                   )}
                 </p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-500">Member Since</label>
-                <p className="text-gray-900">
+                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Member Since</label>
+                <p className="text-[hsl(var(--foreground))]">
                   {new Date(instructor.createdAt).toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'long',
@@ -103,8 +82,8 @@ export default async function SettingsPage() {
               </div>
               {instructor.lastLoginAt && (
                 <div>
-                  <label className="text-sm font-medium text-gray-500">Last Login</label>
-                  <p className="text-gray-900">
+                  <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Last Login</label>
+                  <p className="text-[hsl(var(--foreground))]">
                     {new Date(instructor.lastLoginAt).toLocaleString('en-US', {
                       year: 'numeric',
                       month: 'long',
@@ -119,11 +98,11 @@ export default async function SettingsPage() {
           </div>
 
           {/* Danger Zone */}
-          <div className="bg-white rounded-lg border border-red-200 p-6">
-            <h2 className="text-lg font-semibold text-red-900 mb-2">
+          <div className="bg-[hsl(var(--card))] rounded-lg border border-[hsl(var(--destructive))]/30 p-6">
+            <h2 className="text-lg font-semibold text-[hsl(var(--destructive))] mb-2">
               Danger Zone
             </h2>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-[hsl(var(--muted-foreground))] mb-4">
               Once you delete your account, there is no going back. This will permanently delete your account,
               all your assignments, and all student data.
             </p>
@@ -134,4 +113,3 @@ export default async function SettingsPage() {
     </div>
   );
 }
-

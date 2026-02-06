@@ -1,31 +1,13 @@
 import { db } from '@/db/db';
-import { assignments, instructors, studentSessions, editorEvents } from '@/db/schema';
-import { eq, count, and } from 'drizzle-orm';
-import { cookies, headers } from 'next/headers';
+import { assignments, studentSessions, editorEvents } from '@/db/schema';
+import { eq, count, and, inArray } from 'drizzle-orm';
+import { headers } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, Edit2 } from 'lucide-react';
 import AssignmentTabs from './AssignmentTabs';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || user.role !== 'instructor') {
-    return null;
-  }
-
-  return user;
-}
+import { getInstructor } from '@/lib/auth';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -39,69 +21,70 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
     redirect('/login');
   }
 
-  const requestHeaders = await headers();
+  // Parallelize independent queries
+  const [requestHeaders, assignment, students] = await Promise.all([
+    headers(),
+    db.query.assignments.findFirst({
+      where: and(
+        eq(assignments.id, id),
+        eq(assignments.instructorId, instructor.id)
+      ),
+    }),
+    db
+      .select({
+        id: studentSessions.id,
+        studentFirstName: studentSessions.studentFirstName,
+        studentLastName: studentSessions.studentLastName,
+        studentEmail: studentSessions.studentEmail,
+        startedAt: studentSessions.startedAt,
+        lastSavedAt: studentSessions.lastSavedAt,
+      })
+      .from(studentSessions)
+      .where(eq(studentSessions.assignmentId, id))
+      .orderBy(studentSessions.studentLastName, studentSessions.studentFirstName),
+  ]);
+
+  if (!assignment) {
+    notFound();
+  }
+
   const forwardedProto = requestHeaders.get('x-forwarded-proto') ?? 'http';
   const forwardedHost = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host');
   const baseUrl = forwardedHost
     ? `${forwardedProto}://${forwardedHost}`
     : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
 
-  // Get assignment
-  const assignment = await db.query.assignments.findFirst({
-    where: and(
-      eq(assignments.id, id),
-      eq(assignments.instructorId, instructor.id)
-    ),
-  });
-
-  if (!assignment) {
-    notFound();
-  }
-
-  // Get students with their event statistics
-  const students = await db
-    .select({
-      id: studentSessions.id,
-      studentFirstName: studentSessions.studentFirstName,
-      studentLastName: studentSessions.studentLastName,
-      studentEmail: studentSessions.studentEmail,
-      startedAt: studentSessions.startedAt,
-      lastSavedAt: studentSessions.lastSavedAt,
-    })
-    .from(studentSessions)
-    .where(eq(studentSessions.assignmentId, id))
-    .orderBy(studentSessions.studentLastName, studentSessions.studentFirstName);
-
-  // Get event statistics for each student
-  const studentsWithStats = await Promise.all(
-    students.map(async (student) => {
-      // Count events by type
-      const eventCounts = await db
+  // Single aggregate query for all students' event counts instead of N+1
+  const studentIds = students.map(s => s.id);
+  const allEventCounts = studentIds.length > 0
+    ? await db
         .select({
+          sessionId: editorEvents.sessionId,
           eventType: editorEvents.eventType,
           count: count(),
         })
         .from(editorEvents)
-        .where(eq(editorEvents.sessionId, student.id))
-        .groupBy(editorEvents.eventType);
+        .where(inArray(editorEvents.sessionId, studentIds))
+        .groupBy(editorEvents.sessionId, editorEvents.eventType)
+    : [];
 
-      const stats = {
-        submissions: 0,
-        pasteInternal: 0,
-        pasteExternal: 0,
-        snapshots: 0,
-      };
+  // Build a map: sessionId -> stats
+  const statsMap = new Map<string, { submissions: number; pasteInternal: number; pasteExternal: number; snapshots: number }>();
+  for (const { sessionId, eventType, count: c } of allEventCounts) {
+    if (!statsMap.has(sessionId)) {
+      statsMap.set(sessionId, { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0 });
+    }
+    const stats = statsMap.get(sessionId)!;
+    if (eventType === 'submission') stats.submissions = c;
+    else if (eventType === 'paste_internal') stats.pasteInternal = c;
+    else if (eventType === 'paste_external') stats.pasteExternal = c;
+    else if (eventType === 'snapshot') stats.snapshots = c;
+  }
 
-      eventCounts.forEach(({ eventType, count: c }) => {
-        if (eventType === 'submission') stats.submissions = c;
-        else if (eventType === 'paste_internal') stats.pasteInternal = c;
-        else if (eventType === 'paste_external') stats.pasteExternal = c;
-        else if (eventType === 'snapshot') stats.snapshots = c;
-      });
-
-      return { ...student, stats };
-    })
-  );
+  const studentsWithStats = students.map(student => ({
+    ...student,
+    stats: statsMap.get(student.id) || { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0 },
+  }));
 
   const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
   const isOverdue = new Date(assignment.deadline) < new Date();

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { Button } from '@headlessui/react';
 
 interface Conversation {
   id: string;
@@ -46,17 +45,17 @@ export default function ConversationList({
   };
 
   return (
-    <div className="border-b border-gray-200">
+    <div className="border-b border-[hsl(var(--border))]">
       {/* Toggle button */}
-      <Button
+      <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-2 flex items-center justify-between hover:bg-gray-50 text-sm"
+        className="w-full px-4 py-2 flex items-center justify-between hover:bg-[hsl(var(--accent))] text-sm transition-colors"
       >
-        <span className="text-gray-600">
+        <span className="text-[hsl(var(--muted-foreground))]">
           {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
         </span>
-        <span className="text-gray-400">{isExpanded ? '▼' : '▶'}</span>
-      </Button>
+        <span className="text-[hsl(var(--muted-foreground))]">{isExpanded ? '▼' : '▶'}</span>
+      </button>
 
       {/* Conversation list (collapsible) */}
       {isExpanded && (
@@ -70,8 +69,8 @@ export default function ConversationList({
                 key={conv.id}
                 className={`p-2 rounded cursor-pointer transition-colors ${
                   isActive
-                    ? 'bg-blue-100 border border-blue-300'
-                    : 'bg-white hover:bg-gray-50 border border-gray-200'
+                    ? 'bg-[hsl(var(--primary))]/10 border border-[hsl(var(--primary))]/30'
+                    : 'bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))] border border-[hsl(var(--border))]'
                 }`}
                 onClick={() => !isEditing && onSelectConversation(conv.id)}
               >
@@ -85,52 +84,52 @@ export default function ConversationList({
                         if (e.key === 'Enter') saveTitle(conv.id);
                         if (e.key === 'Escape') cancelEditing();
                       }}
-                      className="text-sm border border-gray-300 rounded px-2 py-1 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="text-sm border border-[hsl(var(--input))] rounded px-2 py-1 w-full bg-[hsl(var(--background))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))]"
                       autoFocus
                     />
                     <div className="flex gap-1">
-                      <Button
+                      <button
                         onClick={() => saveTitle(conv.id)}
-                        className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
+                        className="text-xs bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] px-2 py-1 rounded hover:bg-[hsl(var(--primary))]/90"
                       >
                         Save
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         onClick={cancelEditing}
-                        className="text-xs bg-gray-300 text-gray-700 px-2 py-1 rounded hover:bg-gray-400"
+                        className="text-xs bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] px-2 py-1 rounded hover:bg-[hsl(var(--muted))]/80"
                       >
                         Cancel
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
+                      <p className="text-sm font-medium text-[hsl(var(--foreground))] truncate">
                         {conv.title}
                       </p>
                     </div>
                     <div className="flex gap-1 flex-shrink-0">
-                      <Button
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           startEditing(conv);
                         }}
-                        className="text-xs text-gray-500 hover:text-blue-600"
+                        className="text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))]"
                         title="Edit title"
                       >
                         ✎
-                      </Button>
-                      <Button
+                      </button>
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onDeleteConversation(conv.id);
                         }}
-                        className="text-xs text-gray-500 hover:text-red-600"
+                        className="text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--destructive))]"
                         title="Delete conversation"
                       >
                         🗑
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 )}

@@ -2,10 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import BackLink from '@/components/ui/BackLink';
-import { Button } from '@headlessui/react';
-import InstructionEditor from '@/components/editor/InstructionEditor';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { FileText, Brain, Globe } from 'lucide-react';
+
+const InstructionEditor = dynamic(
+  () => import('@/components/editor/InstructionEditor'),
+  { ssr: false, loading: () => <div className="p-4 text-[hsl(var(--muted-foreground))]">Loading editor...</div> }
+);
 
 export default function NewAssignmentPage() {
   const router = useRouter();
@@ -21,7 +30,7 @@ export default function NewAssignmentPage() {
     const formData = new FormData(e.currentTarget);
     const data = {
       title: formData.get('title') as string,
-      instructions: instructions, // Use state value from editor
+      instructions: instructions,
       deadline: formData.get('deadline') as string,
       customSystemPrompt: formData.get('customSystemPrompt') as string || null,
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
@@ -59,146 +68,156 @@ export default function NewAssignmentPage() {
   const defaultDeadline = `${year}-${month}-${day}T${hours}:${minutes}`;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[hsl(var(--background))]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
             <BackLink href="/instructor/dashboard" label="Back" />
-            <h1 className="text-xl font-bold text-gray-900">New Assignment</h1>
+            <h1 className="text-xl font-bold font-heading text-[hsl(var(--foreground))]">New Assignment</h1>
           </div>
         </div>
       </header>
 
       {/* Form */}
       <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <div className="bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/30 text-[hsl(var(--destructive))] px-4 py-3 rounded-lg text-sm">
               {error}
             </div>
           )}
 
-          {/* Title */}
-          <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-              Title *
-            </label>
-            <input
-              type="text"
-              id="title"
-              name="title"
-              required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="e.g., AI Ethics Essay"
-            />
-          </div>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-[hsl(var(--primary))]" />
+                <CardTitle>Assignment Details</CardTitle>
+              </div>
+              <CardDescription>Basic information and instructions for students.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Title */}
+              <div className="space-y-2">
+                <label htmlFor="title" className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  Title <span className="text-[hsl(var(--destructive))]">*</span>
+                </label>
+                <Input
+                  type="text"
+                  id="title"
+                  name="title"
+                  required
+                  placeholder="e.g., AI Ethics Essay"
+                />
+              </div>
 
-          {/* Instructions */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Instructions *
-            </label>
-            <InstructionEditor
-              initialContent=""
-              onChange={setInstructions}
-              editable={true}
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Use Markdown formatting: **bold**, *italic*, # headings, - lists, etc.
-            </p>
-          </div>
+              {/* Instructions */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  Instructions <span className="text-[hsl(var(--destructive))]">*</span>
+                </label>
+                <div className="border border-[hsl(var(--input))] rounded-md overflow-hidden bg-[hsl(var(--background))]">
+                  <InstructionEditor
+                    initialContent=""
+                    onChange={setInstructions}
+                    editable={true}
+                  />
+                </div>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  Supported Markdown: **bold**, *italic*, # headings, - lists.
+                </p>
+              </div>
 
-          {/* Deadline */}
-          <div>
-            <label htmlFor="deadline" className="block text-sm font-medium text-gray-700 mb-1">
-              Deadline *
-            </label>
-            <input
-              type="datetime-local"
-              id="deadline"
-              name="deadline"
-              required
-              defaultValue={defaultDeadline}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
+              {/* Deadline */}
+              <div className="space-y-2">
+                <label htmlFor="deadline" className="text-sm font-medium text-[hsl(var(--foreground))]">
+                  Deadline <span className="text-[hsl(var(--destructive))]">*</span>
+                </label>
+                <div className="w-full sm:w-1/2">
+                  <Input
+                    type="datetime-local"
+                    id="deadline"
+                    name="deadline"
+                    required
+                    defaultValue={defaultDeadline}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {/* Custom System Prompt */}
-          <div className="border-t border-gray-200 pt-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">AI Assistant Settings</h3>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="customSystemPrompt" className="block text-sm font-medium text-gray-700 mb-1">
+          {/* AI Settings */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Brain className="w-5 h-5 text-[hsl(var(--primary))]" />
+                <CardTitle>AI Assistant Settings</CardTitle>
+              </div>
+              <CardDescription>Configure how the AI helps students with this assignment.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <label htmlFor="customSystemPrompt" className="text-sm font-medium text-[hsl(var(--foreground))]">
                   Custom System Prompt (Optional)
                 </label>
-                <textarea
+                <Textarea
                   id="customSystemPrompt"
                   name="customSystemPrompt"
                   rows={4}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="You are a helpful writing assistant for students. Help them brainstorm ideas, structure their essays, and improve their writing. Encourage critical thinking and original work."
+                  placeholder="You are a helpful writing assistant for students. Help them brainstorm ideas, structure their essays, and improve their writing."
                 />
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
                   Leave empty to use the default system prompt.
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3 p-3 border border-[hsl(var(--border))] rounded-lg bg-[hsl(var(--muted))]/20">
                 <input
                   type="checkbox"
                   id="includeInstructionInPrompt"
                   name="includeInstructionInPrompt"
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
                 />
-                <label htmlFor="includeInstructionInPrompt" className="text-sm text-gray-700">
-                  Include assignment instructions in the AI system prompt
+                <label htmlFor="includeInstructionInPrompt" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
+                  Include instructions in system prompt
                 </label>
               </div>
-              <p className="text-sm text-gray-500 ml-6">
-                When enabled, the AI assistant will be aware of the assignment requirements.
-              </p>
 
               {/* Web Search Toggle */}
-              <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="flex items-center gap-2">
+              <div className="p-4 bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
                   <input
                     type="checkbox"
                     id="allowWebSearch"
                     name="allowWebSearch"
-                    className="h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
+                    className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
                   />
-                  <label htmlFor="allowWebSearch" className="text-sm font-medium text-gray-900">
-                    Allow Web Search
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+                    <label htmlFor="allowWebSearch" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
+                      Allow Web Search
+                    </label>
+                  </div>
                 </div>
-                <p className="mt-2 text-sm text-gray-600 ml-6">
-                  When enabled, students can use the web search feature in the AI assistant to find
-                  real-time information from the internet. This allows the AI to access up-to-date
-                  information beyond its training data.
-                </p>
-                <p className="mt-1 text-sm text-amber-700 ml-6">
-                  <strong>Note:</strong> Web search is disabled by default. Only enable this if your
-                  assignment requires or benefits from accessing external web resources.
+                <p className="text-sm text-[hsl(var(--muted-foreground))] ml-7">
+                  Allows students to use real-time web search during their writing session.
+                  <br />
+                  <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
+                    Recommended only if external research is required.
+                  </span>
                 </p>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          {/* Submit */}
-          <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
-            <Link
-              href="/instructor/dashboard"
-              className="px-4 py-2 text-gray-700 hover:text-gray-900"
-            >
-              Cancel
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-3 pt-4">
+            <Link href="/instructor/dashboard">
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
             </Link>
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="btn-primary"
-            >
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? 'Creating...' : 'Create Assignment'}
             </Button>
           </div>

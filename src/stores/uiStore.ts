@@ -66,25 +66,3 @@ export const useUIStore = create<UIState>()(
   )
 );
 
-// Custom hook for resize functionality
-export function useResizeHandler() {
-  const { isResizing, handleResize, stopResize } = useUIStore();
-
-  // Set up event listeners when resizing
-  if (typeof window !== 'undefined') {
-    const handleMouseMove = (e: MouseEvent) => handleResize(e.clientX);
-    const handleMouseUp = () => stopResize();
-
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-
-      return () => {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }
-
-  return null;
-}

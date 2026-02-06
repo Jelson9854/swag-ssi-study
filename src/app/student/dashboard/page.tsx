@@ -1,31 +1,13 @@
 import { db } from '@/db/db';
-import { assignments, instructors, studentSessions, editorEvents } from '@/db/schema';
-import { eq, desc, and, sql } from 'drizzle-orm';
-import { cookies } from 'next/headers';
+import { assignments, studentSessions, editorEvents } from '@/db/schema';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import JoinAssignmentForm from '@/components/student/JoinAssignmentForm';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import DashboardHeaderActions from '@/components/student/DashboardHeaderActions';
-
-async function getStudent() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || user.role !== 'student') {
-    return null;
-  }
-
-  return user;
-}
+import { getStudent } from '@/lib/auth';
 
 export default async function StudentDashboardPage() {
   const student = await getStudent();
@@ -49,24 +31,27 @@ export default async function StudentDashboardPage() {
     .where(eq(studentSessions.userId, student.id))
     .orderBy(desc(studentSessions.startedAt));
 
-  const sessionsWithActivity = await Promise.all(
-    sessions.map(async (session) => {
-      const [result] = await db
+  // Single aggregate query for all submission timestamps instead of N+1
+  const sessionIds = sessions.map(s => s.sessionId);
+  const submissionTimes = sessionIds.length > 0
+    ? await db
         .select({
-          lastSubmissionAt: sql`max(${editorEvents.timestamp})`,
+          sessionId: editorEvents.sessionId,
+          lastSubmissionAt: sql<Date>`max(${editorEvents.timestamp})`,
         })
         .from(editorEvents)
         .where(and(
-          eq(editorEvents.sessionId, session.sessionId),
+          inArray(editorEvents.sessionId, sessionIds),
           eq(editorEvents.eventType, 'submission')
-        ));
+        ))
+        .groupBy(editorEvents.sessionId)
+    : [];
 
-      return {
-        ...session,
-        lastSubmissionAt: (result?.lastSubmissionAt as Date | null) ?? null,
-      };
-    })
-  );
+  const submissionMap = new Map(submissionTimes.map(st => [st.sessionId, st.lastSubmissionAt]));
+  const sessionsWithActivity = sessions.map(session => ({
+    ...session,
+    lastSubmissionAt: submissionMap.get(session.sessionId) ?? null,
+  }));
 
   const formatDateTime = (value: Date | null) => {
     if (!value) {
@@ -151,11 +136,8 @@ export default async function StudentDashboardPage() {
                           {formatDateTime(session.lastSubmissionAt)}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <Link
-                            href={`/s/${session.shareToken}/editor/${session.sessionId}`}
-                            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 h-9 rounded-md px-3 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90"
-                          >
-                            Open
+                          <Link href={`/s/${session.shareToken}/editor/${session.sessionId}`}>
+                            <Button size="sm">Open</Button>
                           </Link>
                         </td>
                       </tr>
@@ -167,6 +149,6 @@ export default async function StudentDashboardPage() {
           )}
         </div>
       </main>
-    </div >
+    </div>
   );
 }

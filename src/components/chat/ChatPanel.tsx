@@ -383,8 +383,8 @@ export default function ChatPanel({
                     type="submit"
                     disabled={!input.trim() || isLoading || !activeConversationId}
                     className={`p-2 rounded-full transition-colors flex items-center justify-center ${input.trim() && activeConversationId && !isLoading
-                      ? 'bg-gray-700 hover:bg-gray-800 text-white'
-                      : 'bg-gray-300 text-gray-400 cursor-not-allowed'
+                      ? 'bg-[hsl(var(--foreground))] hover:bg-[hsl(var(--foreground))]/90 text-[hsl(var(--background))]'
+                      : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] cursor-not-allowed'
                       }`}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
