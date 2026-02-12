@@ -1,9 +1,18 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { useCreateBlockNote } from '@blocknote/react';
-import { Tooltip } from 'react-tooltip';
+import { Tooltip as TimelineTooltip } from 'react-tooltip';
+import {
+  Area,
+  AreaChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import ChatPanel from '@/components/chat/ChatPanel';
 import { useUIStore } from '@/stores/uiStore';
 import {
@@ -17,7 +26,7 @@ import {
   MenuItems,
 } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
-import { Play, Pause, ChevronDown, Check, Keyboard, MessageSquare, ClipboardCopy, AlertTriangle, Send } from 'lucide-react';
+import { Play, Pause, ChevronDown, Check, Keyboard, MessageSquare, ClipboardCopy, AlertTriangle, Send, BarChart3 } from 'lucide-react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 import 'react-tooltip/dist/react-tooltip.css';
@@ -59,6 +68,57 @@ interface ReplayPlayerProps {
 
 const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
 
+interface WordCountSnapshot {
+  timestamp: number;
+  wordCount: number;
+}
+
+interface WordCountGraphPoint {
+  percentage: number;
+  wordCount: number;
+  time: number;
+  timeFormatted: string;
+}
+
+const extractBlockNoteText = (value: unknown): string => {
+  const parts: string[] = [];
+
+  const walk = (node: unknown, parentKey?: string) => {
+    if (typeof node === 'string') {
+      if (parentKey === 'text' || parentKey === 'content') {
+        parts.push(node);
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach((child) => walk(child, parentKey));
+      return;
+    }
+
+    if (node && typeof node === 'object') {
+      for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+        walk(child, key);
+      }
+    }
+  };
+
+  walk(value);
+  return parts.join(' ');
+};
+
+const countWordsFromDocument = (document: unknown): number => {
+  const plainText = extractBlockNoteText(document)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!plainText) {
+    return 0;
+  }
+
+  return plainText.split(' ').length;
+};
+
 export default function ReplayPlayer({
   events,
   chatMessages,
@@ -88,7 +148,9 @@ export default function ReplayPlayer({
   const [currentEvent, setCurrentEvent] = useState<{ type: string; label: string; timestamp: number } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   const [isEditorReady, setIsEditorReady] = useState(false);
+  const [isWordCountGraphExpanded, setIsWordCountGraphExpanded] = useState(true);
   const prevVisibleMessagesCountRef = useRef<number>(0);
+  const wordCountGradientId = useId();
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
@@ -211,6 +273,7 @@ export default function ReplayPlayer({
   const progress = compressedDuration > 0
     ? ((getCompressedTime(currentTime) - startTime) / compressedDuration) * 100
     : 0;
+  const clampedProgress = Math.max(0, Math.min(100, progress));
 
   // Handle resize with mouse events
   useEffect(() => {
@@ -392,14 +455,28 @@ export default function ReplayPlayer({
     }
   }, [editor, isEditorReady, editorDocument]);
 
+  const seekToPercentage = useCallback((percentage: number) => {
+    if (compressedDuration <= 0) return;
+
+    const clampedPercentage = Math.max(0, Math.min(100, percentage));
+    const newCompressedTime = startTime + (clampedPercentage / 100) * compressedDuration;
+    const newRealTime = getRealTime(newCompressedTime);
+    setCurrentTime(Math.max(startTime, Math.min(endTime, newRealTime)));
+  }, [compressedDuration, startTime, getRealTime, endTime]);
+
   // Handle timeline click (accounting for compressed time)
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const percentage = x / rect.width;
-    const newCompressedTime = startTime + percentage * compressedDuration;
-    const newRealTime = getRealTime(newCompressedTime);
-    setCurrentTime(Math.max(startTime, Math.min(endTime, newRealTime)));
+    const percentage = (x / rect.width) * 100;
+    seekToPercentage(percentage);
+  };
+
+  const handleWordCountGraphClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = (x / rect.width) * 100;
+    seekToPercentage(percentage);
   };
 
   // Format time for display
@@ -409,6 +486,86 @@ export default function ReplayPlayer({
     const remainingSeconds = seconds % 60;
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }, [startTime]);
+
+  const snapshotWordCounts = useMemo<WordCountSnapshot[]>(() => {
+    const snapshots = events
+      .filter((event) => event.eventType === 'snapshot')
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    return snapshots.map((snapshot) => ({
+      timestamp: snapshot.timestamp,
+      wordCount: countWordsFromDocument(snapshot.eventData),
+    }));
+  }, [events]);
+
+  const wordCountGraphData = useMemo<WordCountGraphPoint[]>(() => {
+    if (compressedDuration <= 0) {
+      return [{
+        percentage: 0,
+        wordCount: 0,
+        time: startTime,
+        timeFormatted: formatTime(startTime),
+      }];
+    }
+
+    const sampled: WordCountGraphPoint[] = [];
+    const sampleCount = 100;
+    let snapshotIndex = 0;
+    let currentWordCount = 0;
+
+    for (let i = 0; i <= sampleCount; i++) {
+      const percentage = (i / sampleCount) * 100;
+      const compressedTime = startTime + (compressedDuration * percentage) / 100;
+      const realTime = getRealTime(compressedTime);
+
+      while (
+        snapshotIndex < snapshotWordCounts.length &&
+        snapshotWordCounts[snapshotIndex].timestamp <= realTime
+      ) {
+        currentWordCount = snapshotWordCounts[snapshotIndex].wordCount;
+        snapshotIndex += 1;
+      }
+
+      sampled.push({
+        percentage,
+        wordCount: currentWordCount,
+        time: realTime,
+        timeFormatted: formatTime(realTime),
+      });
+    }
+
+    return sampled;
+  }, [compressedDuration, startTime, getRealTime, snapshotWordCounts, formatTime]);
+
+  const maxWordCount = useMemo(() => {
+    if (wordCountGraphData.length === 0) return 1;
+    return Math.max(...wordCountGraphData.map((point) => point.wordCount), 1);
+  }, [wordCountGraphData]);
+
+  const renderWordCountTooltip = useCallback(
+    ({
+      active,
+      payload,
+    }: {
+      active?: boolean;
+      payload?: ReadonlyArray<{ payload: WordCountGraphPoint }>;
+    }) => {
+      if (!active || !payload || payload.length === 0) return null;
+      const point = payload[0].payload;
+
+      return (
+        <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-2 py-1.5 shadow-md">
+          <div className="text-xs font-semibold text-[hsl(var(--popover-foreground))]">
+            {point.wordCount} words
+          </div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">
+            at {point.timeFormatted}
+          </div>
+        </div>
+      );
+    },
+    []
+  );
 
   // Get timeline markers for events (using compressed time)
   const getEventMarkers = () => {
@@ -627,7 +784,7 @@ export default function ReplayPlayer({
     <div className="flex-1 flex flex-col overflow-hidden">
       {/* Timeline Controls */}
       <div className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] px-6 py-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-end gap-4">
           {/* Play/Pause Button */}
           <Button
             onClick={() => {
@@ -659,6 +816,56 @@ export default function ReplayPlayer({
 
           {/* Timeline Container */}
           <div className="flex-1 flex flex-col gap-1">
+            {/* Word Count Graph */}
+            {snapshotWordCounts.length > 0 && (
+              <div
+                className={`overflow-hidden transition-all duration-300 ${
+                  isWordCountGraphExpanded ? 'h-28' : 'h-0'
+                }`}
+              >
+                <div
+                  className="h-28 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] pl-0.5 py-1 cursor-pointer outline-none focus:outline-none"
+                  onClick={handleWordCountGraphClick}
+                  tabIndex={-1}
+                >
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={wordCountGraphData}
+                      margin={{ top: 2, right: 4, left: 0, bottom: 0 }}
+                      style={{ outline: 'none' }}
+                    >
+                      <defs>
+                        <linearGradient id={wordCountGradientId} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#2563eb" stopOpacity={0.06} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="percentage" type="number" domain={[0, 100]} hide />
+                      <YAxis domain={[0, maxWordCount]} hide />
+                      <RechartsTooltip
+                        content={renderWordCountTooltip}
+                        cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
+                      />
+                      <ReferenceLine
+                        x={clampedProgress}
+                        stroke="#ef4444"
+                        strokeWidth={1.2}
+                        strokeDasharray="4 4"
+                      />
+                      <Area
+                        type="stepAfter"
+                        dataKey="wordCount"
+                        stroke="#2563eb"
+                        strokeWidth={1.8}
+                        fill={`url(#${wordCountGradientId})`}
+                        isAnimationActive={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* Typing Activity Bar (Top) */}
             <div className="h-2 bg-[hsl(var(--secondary))] rounded relative overflow-hidden">
               {typingSessions.map((session, i) => {
@@ -717,7 +924,7 @@ export default function ReplayPlayer({
               {/* Progress bar */}
               <div
                 className="absolute top-0 left-0 h-full bg-[hsl(var(--primary))] rounded-l"
-                style={{ width: `${progress}%` }}
+                style={{ width: `${clampedProgress}%` }}
               />
 
               {/* Event markers */}
@@ -745,11 +952,11 @@ export default function ReplayPlayer({
               {/* Playhead */}
               <div
                 className="absolute top-0 w-0.5 h-full bg-[hsl(var(--foreground))] scale-y-125 transition-transform"
-                style={{ left: `${progress}%` }}
+                style={{ left: `${clampedProgress}%` }}
               />
               <div
                 className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-[hsl(var(--foreground))] rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ left: `calc(${progress}% - 6px)` }}
+                style={{ left: `calc(${clampedProgress}% - 6px)` }}
               />
             </div>
           </div>
@@ -819,79 +1026,92 @@ export default function ReplayPlayer({
           </div>
 
           {/* Event Navigation Dropdown */}
-          <Menu as="div" className="relative">
-            <MenuButton as={Button} variant="outline" size="sm" className="gap-2">
-              <div className="flex items-center gap-2">
-                <span>Events</span>
-                <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-              </div>
-            </MenuButton>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={isWordCountGraphExpanded ? 'primary' : 'outline'}
+              size="sm"
+              className="gap-2"
+              onClick={() => setIsWordCountGraphExpanded((prev) => !prev)}
+              disabled={snapshotWordCounts.length === 0}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Word Count
+            </Button>
 
-            <MenuItems className="absolute right-0 mt-2 w-80 bg-[hsl(var(--popover))] rounded-lg shadow-xl border border-[hsl(var(--border))] z-20 max-h-96 overflow-y-auto focus:outline-none text-[hsl(var(--popover-foreground))]">
-              <div className="sticky top-0 bg-[hsl(var(--muted))] px-4 py-2 border-b border-[hsl(var(--border))]">
-                <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase">
-                  Jump to Event ({navigableEvents.length})
-                </p>
-              </div>
-
-              {navigableEvents.length === 0 ? (
-                <div className="px-4 py-8 text-center text-[hsl(var(--muted-foreground))] text-sm">
-                  No events recorded
+            <Menu as="div" className="relative">
+              <MenuButton as={Button} variant="outline" size="sm" className="gap-2">
+                <div className="flex items-center gap-2">
+                  <span>Events</span>
+                  <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
                 </div>
-              ) : (
-                <div className="py-1">
-                  {navigableEvents.map((event, i) => {
-                    const isPast = event.time <= currentTime;
+              </MenuButton>
 
-                    const getEventIcon = (type: string) => {
-                      switch (type) {
-                        case 'typing_start': return <Keyboard className="w-4 h-4 text-blue-500" />;
-                        case 'chat': return <MessageSquare className="w-4 h-4 text-purple-500" />;
-                        case 'paste_internal': return <ClipboardCopy className="w-4 h-4 text-emerald-500" />;
-                        case 'paste_external': return <AlertTriangle className="w-4 h-4 text-destructive" />;
-                        case 'submission': return <Send className="w-4 h-4 text-orange-500" />;
-                        default: return null;
-                      }
-                    };
+              <MenuItems className="absolute right-0 mt-2 w-80 bg-[hsl(var(--popover))] rounded-lg shadow-xl border border-[hsl(var(--border))] z-20 max-h-96 overflow-y-auto focus:outline-none text-[hsl(var(--popover-foreground))]">
+                <div className="sticky top-0 bg-[hsl(var(--muted))] px-4 py-2 border-b border-[hsl(var(--border))]">
+                  <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase">
+                    Jump to Event ({navigableEvents.length})
+                  </p>
+                </div>
 
-                    return (
-                      <MenuItem key={i}>
-                        {({ active }) => (
-                          <button
-                            onClick={() => setCurrentTime(event.time)}
-                            className={`w-full px-4 py-3 text-left transition-colors border-b border-[hsl(var(--border))] last:border-0 ${active ? 'bg-[hsl(var(--accent))]' :
-                              isPast ? 'bg-[hsl(var(--muted))]/50' : 'bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))]'
-                              }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <span className="mt-0.5 p-1 bg-[hsl(var(--muted))] rounded-md">
-                                {getEventIcon(event.type)}
-                              </span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className={`text-sm font-medium truncate ${isPast ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--foreground))]'
-                                    }`}>
-                                    {event.label}
+                {navigableEvents.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-[hsl(var(--muted-foreground))] text-sm">
+                    No events recorded
+                  </div>
+                ) : (
+                  <div className="py-1">
+                    {navigableEvents.map((event, i) => {
+                      const isPast = event.time <= currentTime;
+
+                      const getEventIcon = (type: string) => {
+                        switch (type) {
+                          case 'typing_start': return <Keyboard className="w-4 h-4 text-blue-500" />;
+                          case 'chat': return <MessageSquare className="w-4 h-4 text-purple-500" />;
+                          case 'paste_internal': return <ClipboardCopy className="w-4 h-4 text-emerald-500" />;
+                          case 'paste_external': return <AlertTriangle className="w-4 h-4 text-destructive" />;
+                          case 'submission': return <Send className="w-4 h-4 text-orange-500" />;
+                          default: return null;
+                        }
+                      };
+
+                      return (
+                        <MenuItem key={i}>
+                          {({ active }) => (
+                            <button
+                              onClick={() => setCurrentTime(event.time)}
+                              className={`w-full px-4 py-3 text-left transition-colors border-b border-[hsl(var(--border))] last:border-0 ${active ? 'bg-[hsl(var(--accent))]' :
+                                isPast ? 'bg-[hsl(var(--muted))]/50' : 'bg-[hsl(var(--card))] hover:bg-[hsl(var(--accent))]'
+                                }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span className="mt-0.5 p-1 bg-[hsl(var(--muted))] rounded-md">
+                                  {getEventIcon(event.type)}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className={`text-sm font-medium truncate ${isPast ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--foreground))]'
+                                      }`}>
+                                      {event.label}
+                                    </p>
+                                    <span className={`text-xs font-mono whitespace-nowrap ${isPast ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))]'
+                                      }`}>
+                                      {formatTime(event.time)}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-[hsl(var(--muted-foreground))] truncate mt-0.5">
+                                    {event.description}
                                   </p>
-                                  <span className={`text-xs font-mono whitespace-nowrap ${isPast ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))]'
-                                    }`}>
-                                    {formatTime(event.time)}
-                                  </span>
                                 </div>
-                                <p className="text-xs text-[hsl(var(--muted-foreground))] truncate mt-0.5">
-                                  {event.description}
-                                </p>
                               </div>
-                            </div>
-                          </button>
-                        )}
-                      </MenuItem>
-                    );
-                  })}
-                </div>
-              )}
-            </MenuItems>
-          </Menu>
+                            </button>
+                          )}
+                        </MenuItem>
+                      );
+                    })}
+                  </div>
+                )}
+              </MenuItems>
+            </Menu>
+          </div>
         </div>
       </div>
 
@@ -981,7 +1201,7 @@ export default function ReplayPlayer({
       </div>
 
       {/* Timeline Tooltip */}
-      <Tooltip
+      <TimelineTooltip
         id="timeline-tooltip"
         place="top"
         className="!bg-gray-900 !rounded-lg !px-3 !py-2 !text-sm !max-w-xs z-50"

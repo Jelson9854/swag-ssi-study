@@ -114,3 +114,11 @@ h6 {
 .bn-editor .bn-block-group>.bn-block-outer:first-child .bn-block-content[data-content-type="paragraph"]:empty::before {
   content: "Start writing your essay here...";
 }
+
+/* Recharts focus outline fix (matches replayGPTWritingSystem behavior) */
+.recharts-wrapper:focus,
+.recharts-wrapper svg:focus,
+.recharts-surface:focus,
+.recharts-wrapper *:focus {
+  outline: none !important;
+}
