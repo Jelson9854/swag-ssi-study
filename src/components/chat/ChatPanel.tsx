@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useMemo } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
 import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import toast, { Toaster } from 'react-hot-toast';
 import ConversationList from './ConversationList';
-import ChatMessages from './ChatMessages';
+import ChatMessages, { type ReplayPasteHighlight } from './ChatMessages';
 import { useChatStore, type Conversation, type Message } from '@/stores/chatStore';
 
 interface ChatPanelProps {
@@ -21,9 +21,11 @@ interface ChatPanelProps {
   replayConversations?: Conversation[];
   replayMessages?: Message[];
   highlightedMessageId?: number | null;
+  replayPasteHighlights?: ReplayPasteHighlight[];
+  onReplayPasteClick?: (timestamp: number) => void;
 }
 
-export default function ChatPanel({
+function ChatPanel({
   sessionId,
   assignmentId,
   // isOpen not used in component body but kept in props for interface
@@ -35,6 +37,8 @@ export default function ChatPanel({
   replayConversations = [],
   replayMessages = [],
   highlightedMessageId = null,
+  replayPasteHighlights = [],
+  onReplayPasteClick,
 }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const validator = getGlobalValidator();
@@ -64,15 +68,6 @@ export default function ChatPanel({
 
   const isReplayMode = mode === 'replay';
 
-  // Memoize replay props to prevent infinite loops
-  const replayMessagesJson = JSON.stringify(replayMessages);
-  const replayConversationsJson = JSON.stringify(replayConversations);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const memoizedReplayMessages = useMemo(() => replayMessages, [replayMessagesJson]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const memoizedReplayConversations = useMemo(() => replayConversations, [replayConversationsJson]);
-
   // Set mode on mount
   useEffect(() => {
     setMode(mode);
@@ -82,7 +77,7 @@ export default function ChatPanel({
   useEffect(() => {
     if (isReplayMode) {
       // Use replay conversations
-      setConversations(memoizedReplayConversations.map(c => ({
+      setConversations(replayConversations.map(c => ({
         ...c,
         createdAt: new Date(c.createdAt)
       })));
@@ -95,7 +90,7 @@ export default function ChatPanel({
       loadConversations(sessionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, isReplayMode, memoizedReplayConversations]);
+  }, [sessionId, isReplayMode, replayConversations]);
 
   // Load messages when active conversation changes
   useEffect(() => {
@@ -104,9 +99,9 @@ export default function ChatPanel({
     if (isReplayMode) {
       // Filter replay messages by active conversation
       if (activeConversationId === 'all') {
-        setMessages(memoizedReplayMessages);
+        setMessages(replayMessages);
       } else {
-        const filtered = memoizedReplayMessages.filter(m =>
+        const filtered = replayMessages.filter(m =>
           m.conversationTitle === conversations.find(c => c.id === activeConversationId)?.title
         );
         setMessages(filtered);
@@ -118,7 +113,7 @@ export default function ChatPanel({
       loadMessages(activeConversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, isReplayMode, memoizedReplayMessages]);
+  }, [activeConversationId, isReplayMode, replayMessages]);
 
   // Copy/Paste validation for chat input
   useEffect(() => {
@@ -320,6 +315,8 @@ export default function ChatPanel({
           enableCopy={!isReplayMode}
           showWebSearchIndicator={isReplayMode}
           highlightedMessageId={highlightedMessageId}
+          replayPasteHighlights={isReplayMode ? replayPasteHighlights : []}
+          onReplayPasteClick={isReplayMode ? onReplayPasteClick : undefined}
         />
 
         {/* Input - only show in live mode */}
@@ -400,3 +397,5 @@ export default function ChatPanel({
     </>
   );
 }
+
+export default memo(ChatPanel);

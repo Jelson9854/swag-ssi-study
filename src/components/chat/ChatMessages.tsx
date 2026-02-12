@@ -1,6 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -28,7 +38,238 @@ interface ChatMessagesProps {
   enableCopy?: boolean;
   showWebSearchIndicator?: boolean;
   highlightedMessageId?: number | null;
+  replayPasteHighlights?: ReplayPasteHighlight[];
+  onReplayPasteClick?: (timestamp: number) => void;
 }
+
+export interface ReplayPasteHighlight {
+  id: string;
+  messageId: string | number;
+  snippet: string;
+  timestamp: number;
+  timeLabel: string;
+}
+
+interface HighlightMatch {
+  start: number;
+  end: number;
+  highlight: ReplayPasteHighlight;
+}
+
+const normalizeForComparison = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/[`*_#>|[\]()-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const buildCandidateSnippets = (rawSnippet: string): string[] => {
+  const candidates = new Set<string>();
+
+  const addCandidate = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed.length >= 3) {
+      candidates.add(trimmed);
+    }
+  };
+
+  const normalizedSnippet = rawSnippet.replace(/\s+/g, ' ').trim();
+  addCandidate(rawSnippet);
+  addCandidate(normalizedSnippet);
+  addCandidate(rawSnippet.replace(/[`*_#>|[\]()-]/g, ' ').replace(/\s+/g, ' ').trim());
+
+  // Long snippets (e.g., pasted markdown tables) often don't exist as one contiguous text node.
+  // Add line/cell-level candidates so table cells can be highlighted individually.
+  const lines = rawSnippet
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  lines.forEach((line) => {
+    if (/^[:|\-\s]+$/.test(line)) {
+      return;
+    }
+
+    addCandidate(line);
+    addCandidate(line.replace(/\s+/g, ' ').trim());
+    addCandidate(line.replace(/[`*_#>|[\]()-]/g, ' ').replace(/\s+/g, ' ').trim());
+
+    if (line.includes('|')) {
+      const cells = line
+        .split('|')
+        .map((cell) => cell.trim())
+        .filter((cell) => cell.length >= 3 && !/^:?-{2,}:?$/.test(cell));
+      cells.forEach((cell) => addCandidate(cell));
+    }
+  });
+
+  if (normalizedSnippet.length >= 60) {
+    addCandidate(normalizedSnippet.slice(0, 120).trim());
+    addCandidate(normalizedSnippet.slice(0, 60).trim());
+  }
+
+  return Array.from(candidates).slice(0, 40);
+};
+
+const collectHighlightMatches = (text: string, highlights: ReplayPasteHighlight[]): HighlightMatch[] => {
+  if (!text || highlights.length === 0) {
+    return [];
+  }
+
+  const allMatches: HighlightMatch[] = [];
+  const lowerText = text.toLowerCase();
+
+  highlights.forEach((highlight) => {
+    const rawSnippet = highlight.snippet.trim();
+    if (rawSnippet.length < 3) {
+      return;
+    }
+
+    const candidateSnippets = buildCandidateSnippets(rawSnippet);
+
+    for (const snippet of candidateSnippets) {
+      const lowerSnippet = snippet.toLowerCase();
+      let searchIndex = 0;
+
+      while (searchIndex < lowerText.length) {
+        const matchIndex = lowerText.indexOf(lowerSnippet, searchIndex);
+        if (matchIndex === -1) {
+          break;
+        }
+
+        allMatches.push({
+          start: matchIndex,
+          end: matchIndex + snippet.length,
+          highlight,
+        });
+        searchIndex = matchIndex + snippet.length;
+      }
+    }
+  });
+
+  if (allMatches.length === 0) {
+    // Fallback: if this whole text node is included in pasted content, highlight the node.
+    // This is especially useful for plain-text copies of rendered tables where row text
+    // may not preserve explicit cell delimiters.
+    const normalizedText = normalizeForComparison(text);
+    if (normalizedText.length >= 4) {
+      const matchedHighlight = highlights.find((highlight) => {
+        const normalizedSnippet = normalizeForComparison(highlight.snippet);
+        return normalizedSnippet.includes(normalizedText);
+      });
+
+      if (matchedHighlight) {
+        return [{
+          start: 0,
+          end: text.length,
+          highlight: matchedHighlight,
+        }];
+      }
+    }
+
+    return [];
+  }
+
+  allMatches.sort((a, b) => {
+    if (a.start !== b.start) {
+      return a.start - b.start;
+    }
+    return (b.end - b.start) - (a.end - a.start);
+  });
+
+  const dedupedMatches: HighlightMatch[] = [];
+  let cursor = 0;
+
+  for (const match of allMatches) {
+    if (match.start < cursor) {
+      continue;
+    }
+    dedupedMatches.push(match);
+    cursor = match.end;
+  }
+
+  return dedupedMatches;
+};
+
+const renderHighlightedText = (
+  text: string,
+  highlights: ReplayPasteHighlight[],
+  onReplayPasteClick?: (timestamp: number) => void
+): ReactNode => {
+  const matches = collectHighlightMatches(text, highlights);
+  if (matches.length === 0) {
+    return text;
+  }
+
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+
+  matches.forEach((match, index) => {
+    if (match.start > cursor) {
+      parts.push(text.slice(cursor, match.start));
+    }
+
+    const highlightedText = text.slice(match.start, match.end);
+    parts.push(
+      <button
+        key={`${match.highlight.id}-${match.start}-${index}`}
+        type="button"
+        className="inline rounded-sm bg-amber-200/90 px-0.5 text-amber-950 underline decoration-amber-500/70 underline-offset-2 hover:bg-amber-300 transition-colors"
+        data-tooltip-id="timeline-tooltip"
+        data-tooltip-html={`<div class="text-center"><div class="font-semibold text-emerald-300">Internal Paste</div><div class="text-xs text-gray-300 mt-1">at ${match.highlight.timeLabel}</div><div class="text-xs text-gray-400 mt-1">Click to jump</div></div>`}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onReplayPasteClick?.(match.highlight.timestamp);
+        }}
+      >
+        {highlightedText}
+      </button>
+    );
+
+    cursor = match.end;
+  });
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return <>{parts}</>;
+};
+
+const renderHighlightedChildren = (
+  children: ReactNode,
+  highlights: ReplayPasteHighlight[],
+  onReplayPasteClick?: (timestamp: number) => void
+): ReactNode => {
+  return Children.map(children, (child) => {
+    if (typeof child === 'string') {
+      return renderHighlightedText(child, highlights, onReplayPasteClick);
+    }
+
+    if (!isValidElement<{ children?: ReactNode }>(child)) {
+      return child;
+    }
+
+    const typedChild = child as ReactElement<{ children?: ReactNode }>;
+    if (typeof typedChild.type === 'string') {
+      if (typedChild.type === 'code' || typedChild.type === 'pre' || typedChild.type === 'button') {
+        return typedChild;
+      }
+    }
+
+    if (typedChild.props.children === undefined) {
+      return typedChild;
+    }
+
+    return cloneElement(
+      typedChild,
+      typedChild.props,
+      renderHighlightedChildren(typedChild.props.children, highlights, onReplayPasteClick)
+    );
+  });
+};
 
 export default function ChatMessages({
   messages,
@@ -38,10 +279,27 @@ export default function ChatMessages({
   enableCopy = true,
   showWebSearchIndicator = false,
   highlightedMessageId = null,
+  replayPasteHighlights = [],
+  onReplayPasteClick,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
   const validator = getGlobalValidator();
+  const messagePasteHighlightMap = useMemo(() => {
+    const map = new Map<string, ReplayPasteHighlight[]>();
+
+    replayPasteHighlights.forEach((highlight) => {
+      const key = String(highlight.messageId);
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(highlight);
+      } else {
+        map.set(key, [highlight]);
+      }
+    });
+
+    return map;
+  }, [replayPasteHighlights]);
 
   // Register all messages with validator (both user and assistant)
   useEffect(() => {
@@ -103,6 +361,7 @@ export default function ChatMessages({
         const isLastMessage = index === messages.length - 1;
         const isStreaming = isLastMessage && isLoading && !isUser;
         const isHighlighted = highlightedMessageId === message.id;
+        const messageHighlights = messagePasteHighlightMap.get(String(message.id)) ?? [];
 
         return (
           <div
@@ -125,15 +384,72 @@ export default function ChatMessages({
               >
                 {isUser ? (
                   <p className="text-base whitespace-pre-wrap wrap-break-word">
-                    {message.content}
+                    {renderHighlightedChildren(message.content, messageHighlights, onReplayPasteClick)}
                   </p>
                 ) : (
                   <div className="prose prose-base max-w-none dark:prose-invert prose-headings:font-outfit prose-p:leading-relaxed prose-pre:bg-[hsl(var(--muted))] prose-pre:text-[hsl(var(--foreground))] prose-pre:border prose-pre:border-[hsl(var(--border))]">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
-                        a: ({ ...props }) => (
-                          <a {...props} target="_blank" rel="noopener noreferrer" className="text-[hsl(var(--primary))] hover:underline" />
+                        p: ({ children, ...props }) => (
+                          <p {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </p>
+                        ),
+                        li: ({ children, ...props }) => (
+                          <li {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </li>
+                        ),
+                        blockquote: ({ children, ...props }) => (
+                          <blockquote {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </blockquote>
+                        ),
+                        h1: ({ children, ...props }) => (
+                          <h1 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h1>
+                        ),
+                        h2: ({ children, ...props }) => (
+                          <h2 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h2>
+                        ),
+                        h3: ({ children, ...props }) => (
+                          <h3 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h3>
+                        ),
+                        h4: ({ children, ...props }) => (
+                          <h4 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h4>
+                        ),
+                        h5: ({ children, ...props }) => (
+                          <h5 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h5>
+                        ),
+                        h6: ({ children, ...props }) => (
+                          <h6 {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </h6>
+                        ),
+                        td: ({ children, ...props }) => (
+                          <td {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </td>
+                        ),
+                        th: ({ children, ...props }) => (
+                          <th {...props}>
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </th>
+                        ),
+                        a: ({ children, ...props }) => (
+                          <a {...props} target="_blank" rel="noopener noreferrer" className="text-[hsl(var(--primary))] hover:underline">
+                            {renderHighlightedChildren(children, messageHighlights, onReplayPasteClick)}
+                          </a>
                         ),
                       }}
                     >

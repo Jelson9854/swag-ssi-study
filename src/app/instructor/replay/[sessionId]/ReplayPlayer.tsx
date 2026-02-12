@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import ChatPanel from '@/components/chat/ChatPanel';
+import type { ReplayPasteHighlight } from '@/components/chat/ChatMessages';
 import { useUIStore } from '@/stores/uiStore';
 import {
   Listbox,
@@ -117,6 +118,14 @@ const countWordsFromDocument = (document: unknown): number => {
   }
 
   return plainText.split(' ').length;
+};
+
+const normalizeForMatching = (value: string): string => {
+  return value
+    .toLowerCase()
+    .replace(/[`*_#>|[\]()-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
 export default function ReplayPlayer({
@@ -316,20 +325,43 @@ export default function ReplayPlayer({
     return [{ type: 'paragraph', content: [] }];
   }, [findNearestSnapshot]);
 
+  const getVisibleMessageCount = useCallback((time: number) => {
+    let left = 0;
+    let right = chatMessages.length;
+
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (chatMessages[mid].timestamp <= time) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+
+    return left;
+  }, [chatMessages]);
+
   // Update visible messages based on current time
   const updateVisibleMessages = useCallback((time: number) => {
-    const visible = chatMessages.filter(m => m.timestamp <= time);
+    const visibleCount = getVisibleMessageCount(time);
+    const previousVisibleCount = prevVisibleMessagesCountRef.current;
+
+    if (visibleCount === previousVisibleCount) {
+      return;
+    }
+
+    const visible = chatMessages.slice(0, visibleCount);
     setVisibleMessages(visible);
 
     // Highlight newly added message
-    if (visible.length > prevVisibleMessagesCountRef.current) {
+    if (visibleCount > previousVisibleCount && visible.length > 0) {
       const newMessage = visible[visible.length - 1];
       setHighlightedMessageId(newMessage.id);
       // Clear highlight after 2 seconds
       setTimeout(() => setHighlightedMessageId(null), 2000);
     }
-    prevVisibleMessagesCountRef.current = visible.length;
-  }, [chatMessages]);
+    prevVisibleMessagesCountRef.current = visibleCount;
+  }, [chatMessages, getVisibleMessageCount]);
 
   // Check for editor-related events at current time (paste, submission)
   const checkCurrentEvent = useCallback((time: number) => {
@@ -479,6 +511,11 @@ export default function ReplayPlayer({
     seekToPercentage(percentage);
   };
 
+  const handleReplayPasteClick = useCallback((timestamp: number) => {
+    setIsPlaying(false);
+    setCurrentTime(timestamp);
+  }, []);
+
   // Format time for display
   const formatTime = useCallback((ms: number) => {
     const seconds = Math.floor((ms - startTime) / 1000);
@@ -542,6 +579,61 @@ export default function ReplayPlayer({
     return Math.max(...wordCountGraphData.map((point) => point.wordCount), 1);
   }, [wordCountGraphData]);
 
+  const replayPasteHighlights = useMemo<ReplayPasteHighlight[]>(() => {
+    const searchableMessages = chatMessages.map((message) => ({
+      id: message.id,
+      timestamp: message.timestamp,
+      normalizedContent: normalizeForMatching(message.content),
+    }));
+
+    const highlights: ReplayPasteHighlight[] = [];
+
+    events
+      .filter((event) => event.eventType === 'paste_internal')
+      .forEach((event, index) => {
+        const pastedContent = ((event.eventData as { content?: string })?.content || '').trim();
+        if (pastedContent.length < 3) {
+          return;
+        }
+
+        const normalizedPasteContent = normalizeForMatching(pastedContent);
+        if (!normalizedPasteContent) {
+          return;
+        }
+
+        let matchedMessage: (typeof searchableMessages)[number] | undefined;
+        for (let i = searchableMessages.length - 1; i >= 0; i -= 1) {
+          const message = searchableMessages[i];
+          if (message.timestamp > event.timestamp) {
+            continue;
+          }
+          if (message.normalizedContent.includes(normalizedPasteContent)) {
+            matchedMessage = message;
+            break;
+          }
+        }
+
+        if (!matchedMessage) {
+          return;
+        }
+
+        highlights.push({
+          id: `paste-highlight-${index}`,
+          messageId: matchedMessage.id,
+          snippet: pastedContent,
+          timestamp: event.timestamp,
+          timeLabel: formatTime(event.timestamp),
+        });
+      });
+
+    return highlights;
+  }, [chatMessages, events, formatTime]);
+
+  const visibleReplayPasteHighlights = useMemo(
+    () => replayPasteHighlights.filter((highlight) => highlight.timestamp <= currentTime),
+    [replayPasteHighlights, currentTime]
+  );
+
   const renderWordCountTooltip = useCallback(
     ({
       active,
@@ -568,8 +660,8 @@ export default function ReplayPlayer({
   );
 
   // Get timeline markers for events (using compressed time)
-  const getEventMarkers = () => {
-    const markers: Array<{
+  const markers = useMemo(() => {
+    const timelineMarkers: Array<{
       id: string;
       position: number;
       type: string;
@@ -578,12 +670,16 @@ export default function ReplayPlayer({
       time: string;
     }> = [];
 
+    if (compressedDuration <= 0) {
+      return timelineMarkers;
+    }
+
     // Chat message markers
     chatMessages.forEach((msg, i) => {
       if (msg.role === 'user') {
         const compressedTime = getCompressedTime(msg.timestamp);
         const position = ((compressedTime - startTime) / compressedDuration) * 100;
-        markers.push({
+        timelineMarkers.push({
           id: `chat-${i}`,
           position,
           type: 'chat',
@@ -601,7 +697,7 @@ export default function ReplayPlayer({
         const compressedTime = getCompressedTime(event.timestamp);
         const position = ((compressedTime - startTime) / compressedDuration) * 100;
         const pasteContent = (event.eventData as { content?: string })?.content || '';
-        markers.push({
+        timelineMarkers.push({
           id: `paste-${i}`,
           position,
           type: event.eventType,
@@ -617,7 +713,7 @@ export default function ReplayPlayer({
       .forEach((event, i) => {
         const compressedTime = getCompressedTime(event.timestamp);
         const position = ((compressedTime - startTime) / compressedDuration) * 100;
-        markers.push({
+        timelineMarkers.push({
           id: `submission-${i}`,
           position,
           type: 'submission',
@@ -627,11 +723,11 @@ export default function ReplayPlayer({
         });
       });
 
-    return markers;
-  };
+    return timelineMarkers;
+  }, [chatMessages, compressedDuration, events, formatTime, getCompressedTime, startTime]);
 
   // Get typing sessions from all events (to match idle period calculation)
-  const getTypingSessions = useCallback(() => {
+  const typingSessions = useMemo(() => {
     // Use same event list as idle period calculation for consistency
     const allEventTimes: number[] = [];
     events.forEach(e => allEventTimes.push(e.timestamp));
@@ -652,10 +748,8 @@ export default function ReplayPlayer({
       const timeSinceLastEvent = allEventTimes[i] - currentSession.endTime;
 
       if (timeSinceLastEvent <= GAP_THRESHOLD) {
-        // 같은 세션 - 종료 시간 연장
         currentSession.endTime = allEventTimes[i];
       } else {
-        // 새로운 세션 시작
         sessions.push(currentSession);
         currentSession = {
           startTime: allEventTimes[i],
@@ -664,17 +758,12 @@ export default function ReplayPlayer({
       }
     }
 
-    // 마지막 세션 추가
     sessions.push(currentSession);
-
     return sessions;
   }, [events, chatMessages]);
 
-  const markers = getEventMarkers();
-  const typingSessions = getTypingSessions();
-
   // Get all navigable events
-  const getNavigableEvents = useCallback(() => {
+  const navigableEvents = useMemo(() => {
     const navEvents: Array<{
       time: number;
       type: 'typing_start' | 'chat' | 'paste_internal' | 'paste_external' | 'submission';
@@ -732,8 +821,6 @@ export default function ReplayPlayer({
     return navEvents.sort((a, b) => a.time - b.time);
   }, [typingSessions, chatMessages, events, formatTime]);
 
-  const navigableEvents = getNavigableEvents();
-
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -779,6 +866,28 @@ export default function ReplayPlayer({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentTime, navigableEvents, speed, startTime, endTime]);
+
+  const replayConversationsForPanel = useMemo(
+    () => conversations.map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title,
+      createdAt: new Date(conversation.createdAt),
+    })),
+    [conversations]
+  );
+
+  const replayMessagesForPanel = useMemo(
+    () => visibleMessages.map((message) => ({
+      id: message.id,
+      role: message.role as 'user' | 'assistant',
+      content: message.content,
+      conversationTitle: message.conversationTitle,
+      timestamp: message.timestamp,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      metadata: message.metadata as { webSearchEnabled?: boolean; webSearchUsed?: boolean; [key: string]: unknown } | undefined,
+    })),
+    [visibleMessages]
+  );
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -1167,21 +1276,11 @@ export default function ReplayPlayer({
               mode="replay"
               isOpen={isChatOpen}
               onToggle={setChatOpen}
-              replayConversations={conversations.map(c => ({
-                id: c.id,
-                title: c.title,
-                createdAt: new Date(c.createdAt),
-              }))}
-              replayMessages={visibleMessages.map(msg => ({
-                id: msg.id,
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-                conversationTitle: msg.conversationTitle,
-                timestamp: msg.timestamp,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                metadata: msg.metadata as { webSearchEnabled?: boolean; webSearchUsed?: boolean;[key: string]: unknown } | undefined,
-              }))}
+              replayConversations={replayConversationsForPanel}
+              replayMessages={replayMessagesForPanel}
               highlightedMessageId={highlightedMessageId}
+              replayPasteHighlights={visibleReplayPasteHighlights}
+              onReplayPasteClick={handleReplayPasteClick}
             />
           </div>
         )}
