@@ -7,7 +7,8 @@ import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import toast, { Toaster } from 'react-hot-toast';
 import ConversationList from './ConversationList';
-import ChatMessages, { type ReplayPasteHighlight } from './ChatMessages';
+import ChatMessages from './ChatMessages';
+import type { ReplayPasteHighlight } from './replayPasteHighlight';
 import { useChatStore, type Conversation, type Message } from '@/stores/chatStore';
 
 interface ChatPanelProps {
@@ -24,6 +25,44 @@ interface ChatPanelProps {
   replayPasteHighlights?: ReplayPasteHighlight[];
   onReplayPasteClick?: (timestamp: number) => void;
 }
+
+const areConversationsEquivalent = (a: Conversation[], b: Conversation[]): boolean => {
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.id !== right.id ||
+      left.title !== right.title ||
+      left.createdAt.getTime() !== right.createdAt.getTime()
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
+const areMessagesEquivalent = (a: Message[], b: Message[]): boolean => {
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.id !== right.id ||
+      left.role !== right.role ||
+      left.content !== right.content ||
+      left.conversationTitle !== right.conversationTitle ||
+      left.timestamp !== right.timestamp
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 function ChatPanel({
   sessionId,
@@ -76,35 +115,51 @@ function ChatPanel({
   // Load conversations on mount
   useEffect(() => {
     if (isReplayMode) {
-      // Use replay conversations
-      setConversations(replayConversations.map(c => ({
+      const replayConversationList = replayConversations.map(c => ({
         ...c,
         createdAt: new Date(c.createdAt)
-      })));
-      // Start with 'all' view for replay mode
-      setActiveConversationId('all');
+      }));
+
+      if (!areConversationsEquivalent(conversations, replayConversationList)) {
+        setConversations(replayConversationList);
+      }
+
+      if (activeConversationId !== 'all') {
+        setActiveConversationId('all');
+      }
       return;
     }
 
     if (sessionId) {
       loadConversations(sessionId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, isReplayMode, replayConversations]);
+  }, [
+    sessionId,
+    isReplayMode,
+    replayConversations,
+    conversations,
+    activeConversationId,
+    setConversations,
+    setActiveConversationId,
+    loadConversations,
+  ]);
 
   // Load messages when active conversation changes
   useEffect(() => {
     if (!activeConversationId) return;
 
     if (isReplayMode) {
-      // Filter replay messages by active conversation
+      let nextMessages: Message[] = [];
       if (activeConversationId === 'all') {
-        setMessages(replayMessages);
+        nextMessages = replayMessages;
       } else {
-        const filtered = replayMessages.filter(m =>
+        nextMessages = replayMessages.filter(m =>
           m.conversationTitle === conversations.find(c => c.id === activeConversationId)?.title
         );
-        setMessages(filtered);
+      }
+
+      if (!areMessagesEquivalent(messages, nextMessages)) {
+        setMessages(nextMessages);
       }
       return;
     }
@@ -112,8 +167,15 @@ function ChatPanel({
     if (activeConversationId !== 'all') {
       loadMessages(activeConversationId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, isReplayMode, replayMessages]);
+  }, [
+    activeConversationId,
+    isReplayMode,
+    replayMessages,
+    conversations,
+    messages,
+    setMessages,
+    loadMessages,
+  ]);
 
   // Copy/Paste validation for chat input
   useEffect(() => {

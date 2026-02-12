@@ -14,7 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import ChatPanel from '@/components/chat/ChatPanel';
-import type { ReplayPasteHighlight } from '@/components/chat/ChatMessages';
+import type { ReplayPasteHighlight } from '@/components/chat/replayPasteHighlight';
 import { useUIStore } from '@/stores/uiStore';
 import {
   Listbox,
