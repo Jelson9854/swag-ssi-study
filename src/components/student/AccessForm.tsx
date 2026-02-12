@@ -15,10 +15,16 @@ interface AccessFormProps {
 export default function AccessForm({ assignmentId, shareToken }: AccessFormProps) {
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [currentUser, setCurrentUser] = useState<{ name?: string | null; email: string; role: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    firstName?: string | null;
+    lastName?: string | null;
+    email: string;
+    role: string;
+  } | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -119,7 +125,8 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
           email,
           shareToken,
         }),
@@ -140,9 +147,9 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
 
   if (verificationSent) {
     return (
-      <Card className="bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
+      <Card className="min-h-[200px] bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+        <CardContent className="!p-6 min-h-[200px] flex items-center">
+          <div className="flex w-full items-start gap-4">
             <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
               <Mail className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
@@ -166,15 +173,15 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
 
   if (!isChecking && currentUser?.role === 'student') {
     return (
-      <Card className="bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
+      <Card className="min-h-[200px] bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
+        <CardContent className="!p-6 min-h-[200px] flex items-center">
+          <div className="flex w-full items-start gap-4">
             <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-full">
               <Check className="w-6 h-6 text-green-600 dark:text-green-400" />
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-green-900 dark:text-green-300 mb-2">
-                Continue as {currentUser.name || currentUser.email}
+                Continue as {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
               </h3>
               <p className="text-sm text-green-800 dark:text-green-200 mb-4">
                 We&apos;ll start your session for this assignment.
@@ -211,9 +218,9 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
 
   if (!isChecking && currentUser?.role === 'instructor') {
     return (
-      <Card className="bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
+      <Card className="min-h-[200px] bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800">
+        <CardContent className="!p-6 min-h-[200px] flex items-center">
+          <div className="flex w-full items-start gap-4">
             <div className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-full">
               <AlertTriangle className="w-6 h-6 text-yellow-600 dark:text-yellow-400" />
             </div>
@@ -307,18 +314,35 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
         </form>
       ) : (
         <form onSubmit={handleSignup} className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="signup-name" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-              Name
-            </label>
-            <Input
-              type="text"
-              id="signup-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              placeholder="Enter your full name"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label htmlFor="signup-first-name" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                First name
+              </label>
+              <Input
+                type="text"
+                id="signup-first-name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                required
+                autoComplete="given-name"
+                placeholder="John"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="signup-last-name" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                Last name
+              </label>
+              <Input
+                type="text"
+                id="signup-last-name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+                autoComplete="family-name"
+                placeholder="Doe"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -356,5 +380,3 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     </div>
   );
 }
-
-
