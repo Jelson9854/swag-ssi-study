@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
 import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
@@ -26,44 +26,6 @@ interface ChatPanelProps {
   onReplayPasteClick?: (timestamp: number) => void;
 }
 
-const areConversationsEquivalent = (a: Conversation[], b: Conversation[]): boolean => {
-  if (a.length !== b.length) return false;
-
-  for (let i = 0; i < a.length; i += 1) {
-    const left = a[i];
-    const right = b[i];
-    if (
-      left.id !== right.id ||
-      left.title !== right.title ||
-      left.createdAt.getTime() !== right.createdAt.getTime()
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
-const areMessagesEquivalent = (a: Message[], b: Message[]): boolean => {
-  if (a.length !== b.length) return false;
-
-  for (let i = 0; i < a.length; i += 1) {
-    const left = a[i];
-    const right = b[i];
-    if (
-      left.id !== right.id ||
-      left.role !== right.role ||
-      left.content !== right.content ||
-      left.conversationTitle !== right.conversationTitle ||
-      left.timestamp !== right.timestamp
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-};
-
 function ChatPanel({
   sessionId,
   assignmentId,
@@ -81,9 +43,11 @@ function ChatPanel({
 }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const validator = getGlobalValidator();
+  const [replayActiveConversationId, setReplayActiveConversationId] = useState<'all' | string>('all');
 
   // Zustand store
   const {
+    mode: storeMode,
     conversations,
     activeConversationId,
     messages,
@@ -92,9 +56,7 @@ function ChatPanel({
     isCreatingConversation,
     webSearchEnabled,
     setMode,
-    setConversations,
     setActiveConversationId,
-    setMessages,
     setInput,
     toggleWebSearch,
     loadConversations,
@@ -106,27 +68,41 @@ function ChatPanel({
   } = useChatStore();
 
   const isReplayMode = mode === 'replay';
+  const replayConversationsWithDate = useMemo(
+    () => replayConversations.map((conversation) => ({
+      ...conversation,
+      createdAt: new Date(conversation.createdAt),
+    })),
+    [replayConversations]
+  );
+
+  const replayVisibleMessages = useMemo(() => {
+    if (replayActiveConversationId === 'all') {
+      return replayMessages;
+    }
+
+    const activeReplayConversation = replayConversationsWithDate.find(
+      (conversation) => conversation.id === replayActiveConversationId
+    );
+    if (!activeReplayConversation) {
+      return replayMessages;
+    }
+
+    return replayMessages.filter(
+      (message) => message.conversationTitle === activeReplayConversation.title
+    );
+  }, [replayActiveConversationId, replayMessages, replayConversationsWithDate]);
 
   // Set mode on mount
   useEffect(() => {
-    setMode(mode);
-  }, [mode, setMode]);
+    if (storeMode !== mode) {
+      setMode(mode);
+    }
+  }, [mode, setMode, storeMode]);
 
-  // Load conversations on mount
+  // Load conversations on mount (live mode only)
   useEffect(() => {
     if (isReplayMode) {
-      const replayConversationList = replayConversations.map(c => ({
-        ...c,
-        createdAt: new Date(c.createdAt)
-      }));
-
-      if (!areConversationsEquivalent(conversations, replayConversationList)) {
-        setConversations(replayConversationList);
-      }
-
-      if (activeConversationId !== 'all') {
-        setActiveConversationId('all');
-      }
       return;
     }
 
@@ -136,33 +112,30 @@ function ChatPanel({
   }, [
     sessionId,
     isReplayMode,
-    replayConversations,
-    conversations,
-    activeConversationId,
-    setConversations,
-    setActiveConversationId,
     loadConversations,
   ]);
 
-  // Load messages when active conversation changes
+  // Keep replay conversation selection valid as replay data changes
   useEffect(() => {
-    if (!activeConversationId) return;
-
-    if (isReplayMode) {
-      let nextMessages: Message[] = [];
-      if (activeConversationId === 'all') {
-        nextMessages = replayMessages;
-      } else {
-        nextMessages = replayMessages.filter(m =>
-          m.conversationTitle === conversations.find(c => c.id === activeConversationId)?.title
-        );
-      }
-
-      if (!areMessagesEquivalent(messages, nextMessages)) {
-        setMessages(nextMessages);
-      }
+    if (!isReplayMode) {
       return;
     }
+
+    if (
+      replayActiveConversationId !== 'all' &&
+      !replayConversationsWithDate.some((conversation) => conversation.id === replayActiveConversationId)
+    ) {
+      setReplayActiveConversationId('all');
+    }
+  }, [isReplayMode, replayActiveConversationId, replayConversationsWithDate]);
+
+  // Load messages when active conversation changes (live mode only)
+  useEffect(() => {
+    if (isReplayMode) {
+      return;
+    }
+
+    if (!activeConversationId) return;
 
     if (activeConversationId !== 'all') {
       loadMessages(activeConversationId);
@@ -170,12 +143,12 @@ function ChatPanel({
   }, [
     activeConversationId,
     isReplayMode,
-    replayMessages,
-    conversations,
-    messages,
-    setMessages,
     loadMessages,
   ]);
+
+  const shownConversations = isReplayMode ? replayConversationsWithDate : conversations;
+  const shownActiveConversationId = isReplayMode ? replayActiveConversationId : activeConversationId;
+  const shownMessages = isReplayMode ? replayVisibleMessages : messages;
 
   // Copy/Paste validation for chat input
   useEffect(() => {
@@ -306,18 +279,18 @@ function ChatPanel({
         </div>
 
         {/* Conversation filter - show in replay mode when there are conversations */}
-        {isReplayMode && conversations.length > 0 && (
+        {isReplayMode && shownConversations.length > 0 && (
           <div className="border-b border-[hsl(var(--border))] px-4 py-2 bg-[hsl(var(--muted))]/10">
             <Listbox
-              value={activeConversationId || 'all'}
-              onChange={(value) => setActiveConversationId(value)}
+              value={shownActiveConversationId || 'all'}
+              onChange={(value) => setReplayActiveConversationId(value)}
             >
               <div className="relative">
                 <ListboxButton className="w-full px-3 py-2 text-sm border border-[hsl(var(--border))] rounded-lg bg-[hsl(var(--background))] text-[hsl(var(--foreground))] text-left flex items-center justify-between gap-2 hover:bg-[hsl(var(--accent))] transition-colors">
                   <span>
-                    {activeConversationId === 'all' || !activeConversationId
-                      ? `All conversations (${conversations.length})`
-                      : conversations.find(c => c.id === activeConversationId)?.title || 'Conversation'}
+                    {shownActiveConversationId === 'all' || !shownActiveConversationId
+                      ? `All conversations (${shownConversations.length})`
+                      : shownConversations.find(c => c.id === shownActiveConversationId)?.title || 'Conversation'}
                   </span>
                   <ChevronDown className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
                 </ListboxButton>
@@ -328,14 +301,14 @@ function ChatPanel({
                   >
                     {({ selected }) => (
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">All conversations ({conversations.length})</span>
+                        <span className="font-medium">All conversations ({shownConversations.length})</span>
                         {selected && (
                           <Check className="w-4 h-4 text-[hsl(var(--primary))]" />
                         )}
                       </div>
                     )}
                   </ListboxOption>
-                  {conversations.map((conv) => (
+                  {shownConversations.map((conv) => (
                     <ListboxOption
                       key={conv.id}
                       value={conv.id}
@@ -370,9 +343,9 @@ function ChatPanel({
 
         {/* Chat Messages */}
         <ChatMessages
-          messages={messages}
-          isLoading={isLoading}
-          showConversationBadge={isReplayMode && activeConversationId === 'all'}
+          messages={shownMessages}
+          isLoading={isReplayMode ? false : isLoading}
+          showConversationBadge={isReplayMode && shownActiveConversationId === 'all'}
           showTimestamp={isReplayMode}
           enableCopy={!isReplayMode}
           showWebSearchIndicator={isReplayMode}

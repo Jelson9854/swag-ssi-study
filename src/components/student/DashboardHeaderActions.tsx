@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Tooltip } from 'react-tooltip';
-import 'react-tooltip/dist/react-tooltip.css';
+import { Tooltip } from '@/components/ui/tooltip';
 
 interface DashboardHeaderActionsProps {
     email: string;

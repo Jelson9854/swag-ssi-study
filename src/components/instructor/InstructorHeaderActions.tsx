@@ -1,9 +1,9 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Settings, LogOut } from 'lucide-react';
 import Link from 'next/link';
-import { Tooltip } from 'react-tooltip';
 
 interface InstructorHeaderActionsProps {
     email: string;

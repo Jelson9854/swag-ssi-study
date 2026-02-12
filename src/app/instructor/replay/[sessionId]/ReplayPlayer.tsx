@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { useCreateBlockNote } from '@blocknote/react';
-import { Tooltip as TimelineTooltip } from 'react-tooltip';
 import {
   Area,
   AreaChart,
@@ -27,10 +26,10 @@ import {
   MenuItems,
 } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
+import { Tooltip as TimelineTooltip } from '@/components/ui/tooltip';
 import { Play, Pause, ChevronDown, Check, Keyboard, MessageSquare, ClipboardCopy, AlertTriangle, Send, BarChart3 } from 'lucide-react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
-import 'react-tooltip/dist/react-tooltip.css';
 
 interface EditorEvent {
   id: number;
@@ -154,11 +153,12 @@ export default function ReplayPlayer({
     { type: 'paragraph', content: [] }
   ]);
   const [visibleMessages, setVisibleMessages] = useState<ChatMessage[]>([]);
-  const [currentEvent, setCurrentEvent] = useState<{ type: string; label: string; timestamp: number } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+  const [visibleReplayPasteHighlights, setVisibleReplayPasteHighlights] = useState<ReplayPasteHighlight[]>([]);
   const [isEditorReady, setIsEditorReady] = useState(false);
   const [isWordCountGraphExpanded, setIsWordCountGraphExpanded] = useState(true);
   const prevVisibleMessagesCountRef = useRef<number>(0);
+  const prevVisibleReplayPasteHighlightCountRef = useRef<number>(0);
   const wordCountGradientId = useId();
 
   const animationRef = useRef<number | null>(null);
@@ -363,43 +363,6 @@ export default function ReplayPlayer({
     prevVisibleMessagesCountRef.current = visibleCount;
   }, [chatMessages, getVisibleMessageCount]);
 
-  // Check for editor-related events at current time (paste, submission)
-  const checkCurrentEvent = useCallback((time: number) => {
-    const EVENT_DISPLAY_DURATION = 3000; // Show event for 3 seconds
-
-    // Check paste events
-    const recentPaste = events.find(
-      e => (e.eventType === 'paste_internal' || e.eventType === 'paste_external') &&
-        e.timestamp <= time &&
-        e.timestamp > time - EVENT_DISPLAY_DURATION
-    );
-    if (recentPaste) {
-      setCurrentEvent({
-        type: recentPaste.eventType,
-        label: recentPaste.eventType === 'paste_external' ? 'External Paste Blocked' : 'Content Pasted',
-        timestamp: recentPaste.timestamp,
-      });
-      return;
-    }
-
-    // Check submission events
-    const recentSubmission = events.find(
-      e => e.eventType === 'submission' &&
-        e.timestamp <= time &&
-        e.timestamp > time - EVENT_DISPLAY_DURATION
-    );
-    if (recentSubmission) {
-      setCurrentEvent({
-        type: 'submission',
-        label: 'Submitted',
-        timestamp: recentSubmission.timestamp,
-      });
-      return;
-    }
-
-    setCurrentEvent(null);
-  }, [events]);
-
   // Animation loop
   useEffect(() => {
     if (!isPlaying) {
@@ -433,9 +396,6 @@ export default function ReplayPlayer({
         }
 
         if (newTime >= endTime) {
-          // Stop playing when reaching the end
-          // Use setTimeout to avoid state update during render
-          setTimeout(() => setIsPlaying(false), 0);
           return endTime;
         }
         return newTime;
@@ -454,13 +414,18 @@ export default function ReplayPlayer({
     };
   }, [isPlaying, speed, endTime, idlePeriods]);
 
+  useEffect(() => {
+    if (isPlaying && currentTime >= endTime) {
+      setIsPlaying(false);
+    }
+  }, [isPlaying, currentTime, endTime]);
+
   // Update content when current time changes
   useEffect(() => {
     const content = rebuildContent(currentTime);
     setEditorDocument(content);
     updateVisibleMessages(currentTime);
-    checkCurrentEvent(currentTime);
-  }, [currentTime, rebuildContent, updateVisibleMessages, checkCurrentEvent]);
+  }, [currentTime, rebuildContent, updateVisibleMessages]);
 
   // Update editor when document changes
   useEffect(() => {
@@ -629,10 +594,27 @@ export default function ReplayPlayer({
     return highlights;
   }, [chatMessages, events, formatTime]);
 
-  const visibleReplayPasteHighlights = useMemo(
-    () => replayPasteHighlights.filter((highlight) => highlight.timestamp <= currentTime),
-    [replayPasteHighlights, currentTime]
-  );
+  useEffect(() => {
+    let left = 0;
+    let right = replayPasteHighlights.length;
+
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (replayPasteHighlights[mid].timestamp <= currentTime) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+
+    const visibleCount = left;
+    if (visibleCount === prevVisibleReplayPasteHighlightCountRef.current) {
+      return;
+    }
+
+    prevVisibleReplayPasteHighlightCountRef.current = visibleCount;
+    setVisibleReplayPasteHighlights(replayPasteHighlights.slice(0, visibleCount));
+  }, [replayPasteHighlights, currentTime]);
 
   const renderWordCountTooltip = useCallback(
     ({
@@ -658,6 +640,39 @@ export default function ReplayPlayer({
     },
     []
   );
+
+  const currentEvent = useMemo(() => {
+    const EVENT_DISPLAY_DURATION = 3000; // Show event for 3 seconds
+    const lowerBound = currentTime - EVENT_DISPLAY_DURATION;
+
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (event.timestamp > currentTime) {
+        continue;
+      }
+      if (event.timestamp <= lowerBound) {
+        break;
+      }
+
+      if (event.eventType === 'paste_internal' || event.eventType === 'paste_external') {
+        return {
+          type: event.eventType,
+          label: event.eventType === 'paste_external' ? 'External Paste Blocked' : 'Content Pasted',
+          timestamp: event.timestamp,
+        };
+      }
+
+      if (event.eventType === 'submission') {
+        return {
+          type: 'submission',
+          label: 'Submitted',
+          timestamp: event.timestamp,
+        };
+      }
+    }
+
+    return null;
+  }, [events, currentTime]);
 
   // Get timeline markers for events (using compressed time)
   const markers = useMemo(() => {
@@ -1305,7 +1320,7 @@ export default function ReplayPlayer({
       <TimelineTooltip
         id="timeline-tooltip"
         place="top"
-        className="!bg-gray-900 !rounded-lg !px-3 !py-2 !text-sm !max-w-xs z-50"
+        className="!bg-gray-900 !text-gray-100 !border-gray-700 !rounded-lg !px-3 !py-2 !text-sm !max-w-xs z-50"
         opacity={1}
       />
     </div>

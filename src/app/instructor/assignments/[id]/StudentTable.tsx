@@ -17,9 +17,8 @@ import {
 import DeleteStudentSessionButton from './DeleteStudentSessionButton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, PlayCircle, FileText, Users } from 'lucide-react';
-import { Tooltip } from 'react-tooltip';
-import 'react-tooltip/dist/react-tooltip.css';
 
 interface StudentWithStats {
   id: string;

@@ -188,7 +188,8 @@ const renderHighlightedText = (
         type="button"
         className="inline rounded-sm bg-amber-200/90 px-0.5 text-amber-950 underline decoration-amber-500/70 underline-offset-2 hover:bg-amber-300 transition-colors"
         data-tooltip-id="timeline-tooltip"
-        data-tooltip-html={`<div class="text-center"><div class="font-semibold text-emerald-300">Internal Paste</div><div class="text-xs text-gray-300 mt-1">at ${match.highlight.timeLabel}</div><div class="text-xs text-gray-400 mt-1">Click to jump</div></div>`}
+        data-tooltip-html={`<div style="max-width: 220px;"><div class="font-semibold text-emerald-300">Internal Paste</div><div class="text-xs text-gray-300 mt-1">at ${match.highlight.timeLabel}</div></div>`}
+        aria-label={`Internal paste at ${match.highlight.timeLabel}`}
         data-replay-highlight-id={match.highlight.id}
         onClick={(e) => {
           e.preventDefault();
