@@ -20,6 +20,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
   const [passcode, setPasscode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [signupEmailSentTo, setSignupEmailSentTo] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +61,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
     e.preventDefault();
     setIsLoading(true);
     setMessage(null);
+    setSignupEmailSentTo(null);
 
     try {
       const response = await fetch('/api/auth/send-magic-link', {
@@ -85,6 +87,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
         type: 'success',
         text: 'Check your email for a verification link!',
       });
+      setSignupEmailSentTo(email.trim());
       setFirstName('');
       setLastName('');
       setEmail('');
@@ -118,7 +121,10 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
               type="button"
               variant={mode === 'login' ? 'primary' : 'ghost'}
               size="sm"
-              onClick={() => setMode('login')}
+              onClick={() => {
+                setMode('login');
+                setMessage(null);
+              }}
               className={mode === 'login' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
             >
               Login
@@ -127,7 +133,10 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
               type="button"
               variant={mode === 'signup' ? 'primary' : 'ghost'}
               size="sm"
-              onClick={() => setMode('signup')}
+              onClick={() => {
+                setMode('signup');
+                setMessage(null);
+              }}
               className={mode === 'signup' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
             >
               Sign Up
@@ -168,12 +177,9 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                 />
               </div>
 
-              {message && (
+              {message?.type === 'error' && (
                 <div
-                  className={`p-3 rounded-md text-sm ${message.type === 'success'
-                    ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'bg-destructive/10 text-destructive'
-                    }`}
+                  className="p-3 rounded-md text-sm bg-destructive/10 text-destructive"
                 >
                   {message.text}
                 </div>
@@ -183,6 +189,13 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                 {isLoading ? 'Logging in...' : 'Log In'}
               </Button>
             </form>
+          ) : signupEmailSentTo ? (
+            <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10 p-4 text-sm">
+              <p className="font-medium text-green-900 dark:text-green-300">Check your email</p>
+              <p className="mt-1 text-green-800 dark:text-green-200">
+                We&apos;ve sent a verification link to <strong>{signupEmailSentTo}</strong>.
+              </p>
+            </div>
           ) : (
             <form onSubmit={handleSignup} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -252,12 +265,9 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                 />
               </div>
 
-              {message && (
+              {message?.type === 'error' && (
                 <div
-                  className={`p-3 rounded-md text-sm ${message.type === 'success'
-                    ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                    : 'bg-destructive/10 text-destructive'
-                    }`}
+                  className="p-3 rounded-md text-sm bg-destructive/10 text-destructive"
                 >
                   {message.text}
                 </div>
