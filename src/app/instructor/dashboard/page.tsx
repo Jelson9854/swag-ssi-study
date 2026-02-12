@@ -6,7 +6,8 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import CopyLinkButton from '@/components/instructor/CopyLinkButton';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
+import EmptyStateCard from '@/components/ui/EmptyStateCard';
 import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
 import { Plus, Users, Calendar, Edit2 } from 'lucide-react';
 import { getInstructor } from '@/lib/auth';
@@ -89,20 +90,18 @@ export default async function DashboardPage() {
 
         {/* Assignments List */}
         {assignmentWithCounts.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="bg-[hsl(var(--muted))] p-4 rounded-full mb-4">
-                <Calendar className="w-8 h-8 text-[hsl(var(--muted-foreground))]" />
-              </div>
-              <h3 className="text-lg font-medium text-[hsl(var(--foreground))]">No assignments yet</h3>
-              <p className="text-[hsl(var(--muted-foreground))] mt-1 max-w-sm">
-                Create your first assignment to verify student essays.
-              </p>
-              <Link href="/instructor/assignments/new" className="mt-6">
+          <EmptyStateCard
+            minHeightClass="min-h-[320px]"
+            icon={<Calendar className="w-8 h-8 text-[hsl(var(--muted-foreground))]" />}
+            title="No assignments yet"
+            description="Create your first assignment to verify student essays."
+            descriptionClassName="max-w-sm"
+            action={(
+              <Link href="/instructor/assignments/new">
                 <Button>Create Assignment</Button>
               </Link>
-            </CardContent>
-          </Card>
+            )}
+          />
         ) : (
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">

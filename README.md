@@ -62,6 +62,34 @@ npm run db:migrate
 npm run dev
 ```
 
+### Local PostgreSQL with Docker Compose
+
+If your default `.env` points to a school/server database, use a local override so development always uses your own local PostgreSQL instance.
+
+```bash
+# 1) Start local PostgreSQL
+docker compose -f docker-compose.local.yml up -d
+
+# 2) Create local env override (Next.js loads .env.local first)
+cp .env.local.example .env.local
+# If 5432 is already in use, change .env.local to another port (e.g. 5433)
+
+# 3) Run migrations against local DB
+npm run db:migrate
+
+# 4) (Optional) seed test data
+npm run db:seed
+
+# 5) Start app
+npm run dev
+```
+
+To stop local PostgreSQL:
+
+```bash
+docker compose -f docker-compose.local.yml down
+```
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and update the values:

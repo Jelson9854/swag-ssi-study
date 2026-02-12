@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import JoinAssignmentForm from '@/components/student/JoinAssignmentForm';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import EmptyStateCard from '@/components/ui/EmptyStateCard';
 import { Button } from '@/components/ui/button';
 import DashboardHeaderActions from '@/components/student/DashboardHeaderActions';
 import { getStudent } from '@/lib/auth';
@@ -89,14 +90,13 @@ export default async function StudentDashboardPage() {
           <h2 className="text-lg font-semibold tracking-tight">Your Assignments</h2>
 
           {sessionsWithActivity.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <p className="text-[hsl(var(--muted-foreground))]">No assignments yet</p>
-                <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
-                  Join an assignment using the form above
-                </p>
-              </CardContent>
-            </Card>
+            <EmptyStateCard
+              minHeightClass="min-h-[160px]"
+              title="No assignments yet"
+              titleClassName="text-base font-normal text-[hsl(var(--muted-foreground))]"
+              description="Join an assignment using the form above"
+              descriptionClassName="text-sm"
+            />
           ) : (
             <Card className="overflow-hidden">
               <div className="overflow-x-auto">

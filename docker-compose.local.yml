@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: swag-local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: swag
+      POSTGRES_PASSWORD: swag
+      POSTGRES_DB: swag
+    ports:
+      - "5432:5432"
+    volumes:
+      - swag-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swag -d swag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  swag-postgres-data:
