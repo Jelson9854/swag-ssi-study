@@ -1,8 +1,18 @@
+import type { PasteMatchMethod, PasteSource } from './copy-validator';
+
 export interface EditorEventData {
   type: 'paste_internal' | 'paste_external' | 'snapshot' | 'submission';
   timestamp: number;
   sequenceNumber: number;
   data?: unknown;
+}
+
+export type PasteTargetArea = 'editor' | 'chat';
+
+export interface PasteEventContext {
+  sourceArea?: PasteSource;
+  targetArea?: PasteTargetArea;
+  matchMethod?: PasteMatchMethod;
 }
 
 export class EventTracker {
@@ -76,12 +86,17 @@ export class EventTracker {
     });
   }
 
-  trackPaste(content: string, isInternal: boolean) {
+  trackPaste(content: string, isInternal: boolean, context: PasteEventContext = {}) {
     this.queue.push({
       type: isInternal ? 'paste_internal' : 'paste_external',
       timestamp: Date.now(),
       sequenceNumber: this.sequenceNumber++,
-      data: { content },
+      data: {
+        content,
+        sourceArea: context.sourceArea ?? (isInternal ? 'unknown' : 'external'),
+        targetArea: context.targetArea ?? 'editor',
+        matchMethod: context.matchMethod ?? 'none',
+      },
     });
 
     this.scheduleSave();
@@ -172,4 +187,17 @@ export class EventTracker {
   forceSave() {
     return this.flush();
   }
+}
+
+const trackerBySession = new Map<string, EventTracker>();
+
+export function getSessionEventTracker(sessionId: string): EventTracker {
+  let tracker = trackerBySession.get(sessionId);
+
+  if (!tracker) {
+    tracker = new EventTracker(sessionId);
+    trackerBySession.set(sessionId, tracker);
+  }
+
+  return tracker;
 }

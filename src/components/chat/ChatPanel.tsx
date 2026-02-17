@@ -5,6 +5,7 @@ import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headless
 import { Button } from '@/components/ui/button';
 import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
 import { getGlobalValidator } from '@/lib/copy-validator';
+import { getSessionEventTracker } from '@/lib/event-tracker';
 import toast, { Toaster } from 'react-hot-toast';
 import ConversationList from './ConversationList';
 import ChatMessages from './ChatMessages';
@@ -152,23 +153,48 @@ function ChatPanel({
 
   // Copy/Paste validation for chat input
   useEffect(() => {
+    if (isReplayMode) return;
+
     const inputElement = inputRef.current;
     if (!inputElement) return;
+    const tracker = sessionId ? getSessionEventTracker(sessionId) : null;
 
     const handleCopy = () => {
       const copiedContent = window.getSelection()?.toString();
       if (copiedContent) {
-        validator.markInternalCopy(copiedContent);
+        validator.markInternalCopy(copiedContent, 'chat');
       }
     };
 
     const handlePaste = (e: ClipboardEvent) => {
-      const pastedContent = e.clipboardData?.getData('text/plain');
-      if (!pastedContent) return;
+      const pastedContent = e.clipboardData?.getData('text/plain')?.trim() || '';
 
-      const isInternal = validator.validatePaste(pastedContent);
+      if (!pastedContent) {
+        tracker?.trackPaste('[non-text clipboard content]', false, {
+          sourceArea: 'unknown',
+          targetArea: 'chat',
+          matchMethod: 'none',
+        });
+        e.preventDefault();
+        toast.error('External paste is blocked. You can only paste content from within this system.', {
+          duration: 4000,
+          position: 'top-center',
+          style: {
+            background: '#EF4444',
+            color: '#fff',
+          },
+        });
+        return;
+      }
 
-      if (!isInternal) {
+      const classification = validator.classifyPaste(pastedContent);
+      tracker?.trackPaste(pastedContent, classification.isInternal, {
+        sourceArea: classification.source,
+        targetArea: 'chat',
+        matchMethod: classification.matchMethod,
+      });
+
+      if (!classification.isInternal) {
         // Block external paste
         e.preventDefault();
         toast.error('External paste is blocked. You can only paste content from within this system.', {
@@ -192,7 +218,7 @@ function ChatPanel({
       inputElement.removeEventListener('copy', handleCopy);
       inputElement.removeEventListener('paste', handlePaste as EventListener);
     };
-  }, [validator]);
+  }, [validator, isReplayMode, sessionId]);
 
   // Auto-generate title from first message (only in live mode)
   useEffect(() => {

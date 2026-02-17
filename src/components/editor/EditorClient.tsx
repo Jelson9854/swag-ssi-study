@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { FileText, History, Send, Bot, Check, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getGlobalValidator } from '@/lib/copy-validator';
 
 interface EditorClientProps {
   sessionId: string;
@@ -30,6 +31,8 @@ export default function EditorClient({
   allowWebSearch,
   strictPasteBlocking,
 }: EditorClientProps) {
+  const validator = getGlobalValidator();
+
   const {
     isChatOpen,
     chatWidth,
@@ -53,6 +56,10 @@ export default function EditorClient({
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<number | null>(null);
   const [isSubmissionModalOpen, setIsSubmissionModalOpen] = useState(false);
   const [hasChangesAfterSubmit, setHasChangesAfterSubmit] = useState(false);
+
+  useEffect(() => {
+    validator.registerInstruction(assignmentInstructions);
+  }, [assignmentInstructions, validator]);
 
   // Listen for save events
   useEffect(() => {
@@ -132,6 +139,13 @@ export default function EditorClient({
         setIsSubmissionModalOpen(true);
       });
   };
+
+  const handleInstructionCopy = useCallback(() => {
+    const copiedContent = window.getSelection()?.toString();
+    if (copiedContent) {
+      validator.markInternalCopy(copiedContent, 'instruction');
+    }
+  }, [validator]);
 
   // Handle resize with mouse events
   useEffect(() => {
@@ -237,7 +251,10 @@ export default function EditorClient({
             <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
               <div className="max-w-4xl mx-auto p-6">
                 <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Instructions</h2>
-                <div className="prose prose-sm max-w-none max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg p-4 border border-[hsl(var(--border))]">
+                <div
+                  className="prose prose-sm max-w-none max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg p-4 border border-[hsl(var(--border))]"
+                  onCopy={handleInstructionCopy}
+                >
                   <div className="text-[hsl(var(--foreground))] prose prose-sm max-w-none dark:prose-invert">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {assignmentInstructions}

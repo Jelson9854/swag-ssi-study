@@ -115,10 +115,24 @@ export default function ChatMessages({
   // Handle copy events in chat messages area
   useEffect(() => {
     const handleCopy = () => {
-      const copiedContent = window.getSelection()?.toString();
-      if (copiedContent) {
-        validator.markInternalCopy(copiedContent);
+      const selection = window.getSelection();
+      const copiedContent = selection?.toString();
+      const scrollContainer = scrollContainerRef.current;
+
+      if (!selection || !copiedContent || !scrollContainer || selection.rangeCount === 0) {
+        return;
       }
+
+      const commonAncestor = selection.getRangeAt(0).commonAncestorContainer;
+      const selectedNode = commonAncestor.nodeType === Node.TEXT_NODE
+        ? commonAncestor.parentNode
+        : commonAncestor;
+
+      if (!selectedNode || !scrollContainer.contains(selectedNode)) {
+        return;
+      }
+
+      validator.markInternalCopy(copiedContent, 'chat');
     };
 
     document.addEventListener('copy', handleCopy);
@@ -134,7 +148,7 @@ export default function ChatMessages({
       setCopiedId(messageId);
 
       // Mark as internal copy in validator
-      validator.markInternalCopy(content);
+      validator.markInternalCopy(content, 'chat');
 
       setTimeout(() => setCopiedId(null), 2000);
     } catch (error) {

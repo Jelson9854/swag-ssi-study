@@ -41,6 +41,11 @@ interface ViewWrapperProps {
     timeSpent: number;
     wordCount: number;
   };
+  pasteRoutes: Array<{
+    sourceArea: 'chat' | 'editor' | 'instruction' | 'external' | 'unknown';
+    targetArea: 'editor' | 'chat';
+    count: number;
+  }>;
   latestSnapshot: { eventData: Record<string, unknown>[] } | null;
   submissions: Array<{
     id: number;
@@ -54,7 +59,27 @@ interface ViewWrapperProps {
   } | null;
 }
 
-export default function ViewWrapper({ session, assignment, stats, latestSnapshot, submissions, latestSubmission }: ViewWrapperProps) {
+export default function ViewWrapper({
+  session,
+  assignment,
+  stats,
+  pasteRoutes,
+  latestSnapshot,
+  submissions,
+  latestSubmission,
+}: ViewWrapperProps) {
+  const sourceAreaLabel = (sourceArea: ViewWrapperProps['pasteRoutes'][number]['sourceArea']) => {
+    if (sourceArea === 'instruction') return 'Instruction';
+    if (sourceArea === 'external') return 'External';
+    if (sourceArea === 'chat') return 'Chat';
+    if (sourceArea === 'editor') return 'Editor';
+    return 'Unknown';
+  };
+
+  const targetAreaLabel = (targetArea: ViewWrapperProps['pasteRoutes'][number]['targetArea']) => {
+    return targetArea === 'chat' ? 'Chat' : 'Editor';
+  };
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
       {/* Header */}
@@ -153,6 +178,26 @@ export default function ViewWrapper({ session, assignment, stats, latestSnapshot
                   <p className="text-xs text-[hsl(var(--muted-foreground))]">External</p>
                 </div>
               </div>
+              {pasteRoutes.length > 0 && (
+                <div className="mt-3 border-t border-[hsl(var(--border))] pt-3 space-y-1.5">
+                  {pasteRoutes.slice(0, 3).map((route) => (
+                    <div
+                      key={`${route.sourceArea}-${route.targetArea}`}
+                      className="flex items-center justify-between text-xs"
+                    >
+                      <span className="text-[hsl(var(--muted-foreground))]">
+                        {sourceAreaLabel(route.sourceArea)} → {targetAreaLabel(route.targetArea)}
+                      </span>
+                      <span className="font-medium text-[hsl(var(--foreground))]">{route.count}</span>
+                    </div>
+                  ))}
+                  {pasteRoutes.length > 3 && (
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      +{pasteRoutes.length - 3} more routes
+                    </p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -5,22 +5,59 @@
  * if it's from the internal chatbot (allowed) or external source (blocked).
  */
 
+export type InternalCopySource = 'chat' | 'editor' | 'instruction';
+export type PasteSource = InternalCopySource | 'external' | 'unknown';
+export type PasteMatchMethod =
+  | 'copy_buffer'
+  | 'chat_exact'
+  | 'chat_substring'
+  | 'chat_fuzzy'
+  | 'instruction_exact'
+  | 'instruction_substring'
+  | 'instruction_fuzzy'
+  | 'none';
+
+export interface PasteClassification {
+  isInternal: boolean;
+  source: PasteSource;
+  matchMethod: PasteMatchMethod;
+}
+
+interface InternalCopyBufferEntry {
+  content: string;
+  source: InternalCopySource;
+}
+
 export class CopyValidator {
   private chatHistory: Set<string> = new Set();
-  private internalCopyBuffer: string | null = null;
+  private instructionHistory: Set<string> = new Set();
+  private internalCopyBuffer: InternalCopyBufferEntry | null = null;
 
   /**
    * Register a chat message from the assistant
    */
   registerChatMessage(content: string) {
-    this.chatHistory.add(content.trim());
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    this.chatHistory.add(trimmed);
+  }
+
+  /**
+   * Register assignment instruction content
+   */
+  registerInstruction(content: string) {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    this.instructionHistory.add(trimmed);
   }
 
   /**
    * Mark content as copied from internal source (chatbot)
    */
-  markInternalCopy(content: string) {
-    this.internalCopyBuffer = content.trim();
+  markInternalCopy(content: string, source: InternalCopySource = 'chat') {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    this.internalCopyBuffer = { content: trimmed, source };
   }
 
   /**
@@ -28,43 +65,105 @@ export class CopyValidator {
    * Returns true if internal (allowed), false if external (blocked)
    */
   validatePaste(pastedContent: string): boolean {
+    return this.classifyPaste(pastedContent).isInternal;
+  }
+
+  /**
+   * Classify pasted content with source metadata.
+   */
+  classifyPaste(pastedContent: string): PasteClassification {
     const trimmed = pastedContent.trim();
 
     // Block very short pastes (likely external snippets)
     if (trimmed.length < 3) {
-      return false;
+      return {
+        isInternal: false,
+        source: 'external',
+        matchMethod: 'none',
+      };
     }
 
     // 1. Check if it's the recently copied internal content
-    if (this.internalCopyBuffer && trimmed === this.internalCopyBuffer) {
-      return true;
+    if (this.internalCopyBuffer && trimmed === this.internalCopyBuffer.content) {
+      return {
+        isInternal: true,
+        source: this.internalCopyBuffer.source,
+        matchMethod: 'copy_buffer',
+      };
     }
 
     // 2. Exact match in chat history
     if (this.chatHistory.has(trimmed)) {
-      return true;
+      return {
+        isInternal: true,
+        source: 'chat',
+        matchMethod: 'chat_exact',
+      };
     }
 
-    // 3. Check if pasted content is a substring of any chat message
+    // 3. Exact match in assignment instructions
+    if (this.instructionHistory.has(trimmed)) {
+      return {
+        isInternal: true,
+        source: 'instruction',
+        matchMethod: 'instruction_exact',
+      };
+    }
+
+    // 4. Check if pasted content is a substring of any chat message
     for (const chatContent of this.chatHistory) {
       if (chatContent.includes(trimmed) && trimmed.length >= 10) {
-        return true;
+        return {
+          isInternal: true,
+          source: 'chat',
+          matchMethod: 'chat_substring',
+        };
       }
     }
 
-    // 4. Fuzzy matching for slightly modified content
+    // 5. Check if pasted content is a substring of assignment instructions
+    for (const instructionContent of this.instructionHistory) {
+      if (instructionContent.includes(trimmed) && trimmed.length >= 10) {
+        return {
+          isInternal: true,
+          source: 'instruction',
+          matchMethod: 'instruction_substring',
+        };
+      }
+    }
+
+    // 6. Fuzzy matching for slightly modified chat content
     // Use stricter threshold (95%) and require minimum length
     if (trimmed.length >= 20) {
       for (const chatContent of this.chatHistory) {
         const similarity = this.calculateSimilarity(trimmed, chatContent);
         if (similarity >= 0.95) {
-          return true;
+          return {
+            isInternal: true,
+            source: 'chat',
+            matchMethod: 'chat_fuzzy',
+          };
+        }
+      }
+
+      for (const instructionContent of this.instructionHistory) {
+        const similarity = this.calculateSimilarity(trimmed, instructionContent);
+        if (similarity >= 0.95) {
+          return {
+            isInternal: true,
+            source: 'instruction',
+            matchMethod: 'instruction_fuzzy',
+          };
         }
       }
     }
 
     // External paste detected
-    return false;
+    return {
+      isInternal: false,
+      source: 'external',
+      matchMethod: 'none',
+    };
   }
 
   /**

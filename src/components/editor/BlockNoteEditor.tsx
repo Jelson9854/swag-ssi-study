@@ -5,7 +5,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
-import { EventTracker } from "@/lib/event-tracker";
+import { EventTracker, getSessionEventTracker } from "@/lib/event-tracker";
 import { getGlobalValidator } from "@/lib/copy-validator";
 import toast from "react-hot-toast";
 
@@ -72,7 +72,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
   // Initialize event tracker
   useEffect(() => {
-    trackerRef.current = new EventTracker(sessionId);
+    trackerRef.current = getSessionEventTracker(sessionId);
 
     // Snapshot 콜백 등록 (타이핑 멈춤 감지용)
     if (trackerRef.current) {
@@ -216,7 +216,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
       if (copiedContent) {
         // Mark content as copied from internal editor
-        validator.markInternalCopy(copiedContent);
+        validator.markInternalCopy(copiedContent, "editor");
       }
     };
 
@@ -226,7 +226,11 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
       if (!pastedContent) {
         if (tracker) {
-          tracker.trackPaste("[non-text clipboard content]", false);
+          tracker.trackPaste("[non-text clipboard content]", false, {
+            sourceArea: "unknown",
+            targetArea: "editor",
+            matchMethod: "none",
+          });
         }
 
         // In strict mode, non-text clipboard payloads are treated as external content and blocked.
@@ -236,14 +240,18 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
         return;
       }
 
-      const isInternal = validator.validatePaste(pastedContent);
+      const classification = validator.classifyPaste(pastedContent);
 
       // Track the paste event
       if (tracker) {
-        tracker.trackPaste(pastedContent, isInternal);
+        tracker.trackPaste(pastedContent, classification.isInternal, {
+          sourceArea: classification.source,
+          targetArea: "editor",
+          matchMethod: classification.matchMethod,
+        });
       }
 
-      if (!isInternal) {
+      if (!classification.isInternal) {
         // Allow external paste when strict blocking is disabled. Logs are still recorded.
         if (strictPasteBlocking) {
           blockExternalPaste(e);

@@ -5,6 +5,9 @@ import { redirect, notFound } from 'next/navigation';
 import ViewWrapper from './ViewWrapper';
 import { getInstructor } from '@/lib/auth';
 
+type PasteSourceArea = 'chat' | 'editor' | 'instruction' | 'external' | 'unknown';
+type PasteTargetArea = 'editor' | 'chat';
+
 interface PageProps {
   params: Promise<{ sessionId: string }>;
 }
@@ -74,6 +77,48 @@ export default async function ViewPage({ params }: PageProps) {
   const externalPasteAttempts = events.filter(e => e.eventType === 'paste_external').length;
   const internalPastes = events.filter(e => e.eventType === 'paste_internal').length;
 
+  const normalizePasteSource = (
+    sourceArea: unknown,
+    fallbackForLegacyEvent: PasteSourceArea
+  ): PasteSourceArea => {
+    if (
+      sourceArea === 'chat' ||
+      sourceArea === 'editor' ||
+      sourceArea === 'instruction' ||
+      sourceArea === 'external' ||
+      sourceArea === 'unknown'
+    ) {
+      return sourceArea;
+    }
+    return fallbackForLegacyEvent;
+  };
+
+  const normalizePasteTarget = (targetArea: unknown): PasteTargetArea => {
+    return targetArea === 'chat' ? 'chat' : 'editor';
+  };
+
+  const pasteRouteCounts = new Map<string, { sourceArea: PasteSourceArea; targetArea: PasteTargetArea; count: number }>();
+  events
+    .filter((event) => event.eventType === 'paste_internal' || event.eventType === 'paste_external')
+    .forEach((event) => {
+      const eventData = (event.eventData || {}) as { sourceArea?: unknown; targetArea?: unknown };
+      const sourceArea = normalizePasteSource(
+        eventData.sourceArea,
+        event.eventType === 'paste_external' ? 'external' : 'unknown'
+      );
+      const targetArea = normalizePasteTarget(eventData.targetArea);
+      const key = `${sourceArea}->${targetArea}`;
+      const existing = pasteRouteCounts.get(key);
+
+      if (existing) {
+        existing.count += 1;
+      } else {
+        pasteRouteCounts.set(key, { sourceArea, targetArea, count: 1 });
+      }
+    });
+
+  const pasteRoutes = Array.from(pasteRouteCounts.values()).sort((a, b) => b.count - a.count);
+
   const totalChatMessages = flatMessages.length;
   const userMessages = flatMessages.filter(m => m.role === 'user').length;
   const assistantMessages = flatMessages.filter(m => m.role === 'assistant').length;
@@ -116,6 +161,7 @@ export default async function ViewPage({ params }: PageProps) {
       session={session}
       assignment={assignment}
       stats={stats}
+      pasteRoutes={pasteRoutes}
       latestSnapshot={latestSnapshot ? { ...latestSnapshot, eventData: latestSnapshot.eventData as Record<string, unknown>[] } : null}
       submissions={submissions.map(s => ({ ...s, eventData: s.eventData as Record<string, unknown>[] }))}
       latestSubmission={latestSubmission ? { ...latestSubmission, eventData: latestSubmission.eventData as Record<string, unknown>[] } : null}

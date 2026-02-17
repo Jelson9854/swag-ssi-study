@@ -127,6 +127,41 @@ const normalizeForMatching = (value: string): string => {
     .trim();
 };
 
+type PasteSourceArea = 'chat' | 'editor' | 'instruction' | 'external' | 'unknown';
+type PasteTargetArea = 'editor' | 'chat';
+
+const normalizePasteSourceArea = (sourceArea: unknown, eventType: string): PasteSourceArea => {
+  if (
+    sourceArea === 'chat' ||
+    sourceArea === 'editor' ||
+    sourceArea === 'instruction' ||
+    sourceArea === 'external' ||
+    sourceArea === 'unknown'
+  ) {
+    return sourceArea;
+  }
+  return eventType === 'paste_external' ? 'external' : 'unknown';
+};
+
+const normalizePasteTargetArea = (targetArea: unknown): PasteTargetArea => {
+  return targetArea === 'chat' ? 'chat' : 'editor';
+};
+
+const pasteAreaLabel = (area: PasteSourceArea | PasteTargetArea): string => {
+  if (area === 'instruction') return 'Instruction';
+  if (area === 'chat') return 'Chat';
+  if (area === 'editor') return 'Editor';
+  if (area === 'external') return 'External';
+  return 'Unknown';
+};
+
+const getPasteRouteLabel = (event: EditorEvent): string => {
+  const eventData = (event.eventData || {}) as { sourceArea?: unknown; targetArea?: unknown };
+  const sourceArea = normalizePasteSourceArea(eventData.sourceArea, event.eventType);
+  const targetArea = normalizePasteTargetArea(eventData.targetArea);
+  return `${pasteAreaLabel(sourceArea)} -> ${pasteAreaLabel(targetArea)}`;
+};
+
 export default function ReplayPlayer({
   events,
   chatMessages,
@@ -664,7 +699,8 @@ export default function ReplayPlayer({
       if (event.eventType === 'paste_internal' || event.eventType === 'paste_external') {
         return {
           type: event.eventType,
-          label: event.eventType === 'paste_external' ? 'External Paste Blocked' : 'Content Pasted',
+          label: event.eventType === 'paste_external' ? 'External Paste' : 'Content Pasted',
+          detail: getPasteRouteLabel(event),
           timestamp: event.timestamp,
         };
       }
@@ -673,6 +709,7 @@ export default function ReplayPlayer({
         return {
           type: 'submission',
           label: 'Submitted',
+          detail: null,
           timestamp: event.timestamp,
         };
       }
@@ -690,6 +727,7 @@ export default function ReplayPlayer({
       label: string;
       content: string;
       time: string;
+      route?: string;
     }> = [];
 
     if (compressedDuration <= 0) {
@@ -719,13 +757,15 @@ export default function ReplayPlayer({
         const compressedTime = getCompressedTime(event.timestamp);
         const position = ((compressedTime - startTime) / compressedDuration) * 100;
         const pasteContent = (event.eventData as { content?: string })?.content || '';
+        const route = getPasteRouteLabel(event);
         timelineMarkers.push({
           id: `paste-${i}`,
           position,
           type: event.eventType,
-          label: event.eventType === 'paste_external' ? 'External Paste (Blocked)' : 'Internal Paste',
+          label: event.eventType === 'paste_external' ? 'External Paste' : 'Internal Paste',
           content: pasteContent.length > 100 ? pasteContent.slice(0, 100) + '...' : pasteContent,
           time: formatTime(event.timestamp),
+          route,
         });
       });
 
@@ -819,11 +859,12 @@ export default function ReplayPlayer({
     events
       .filter(e => e.eventType === 'paste_internal' || e.eventType === 'paste_external')
       .forEach((event, i) => {
+        const routeLabel = getPasteRouteLabel(event);
         navEvents.push({
           time: event.timestamp,
           type: event.eventType as 'paste_internal' | 'paste_external',
           label: event.eventType === 'paste_external' ? `External Paste ${i + 1}` : `Internal Paste ${i + 1}`,
-          description: `At ${formatTime(event.timestamp)}`,
+          description: `${routeLabel} at ${formatTime(event.timestamp)}`,
         });
       });
 
@@ -1077,7 +1118,7 @@ export default function ReplayPlayer({
                   data-tooltip-html={`<div style="max-width: 250px;"><div class="font-semibold ${marker.type === 'paste_external' ? 'text-red-300' :
                     marker.type === 'paste_internal' ? 'text-green-300' :
                       marker.type === 'submission' ? 'text-orange-300' : 'text-purple-300'
-                    }">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''
+                    }">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.route ? `<div class="text-xs text-gray-300 mt-1">${marker.route}</div>` : ''}${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''
                     }</div>`}
                 />
               ))}
@@ -1270,7 +1311,12 @@ export default function ReplayPlayer({
                 {currentEvent.type === 'paste_external' && <AlertTriangle className="w-4 h-4" />}
                 {currentEvent.type === 'paste_internal' && <ClipboardCopy className="w-4 h-4" />}
                 {currentEvent.type === 'submission' && <Send className="w-4 h-4" />}
-                <span>{currentEvent.label}</span>
+                <div className="flex flex-col leading-tight">
+                  <span>{currentEvent.label}</span>
+                  {currentEvent.detail && (
+                    <span className="text-[11px] opacity-80">{currentEvent.detail}</span>
+                  )}
+                </div>
               </div>
             )}
             <div className="max-w-3xl mx-auto">
