@@ -11,9 +11,10 @@ import toast from "react-hot-toast";
 
 interface BlockNoteEditorProps {
   sessionId: string;
+  strictPasteBlocking: boolean;
 }
 
-export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
+export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
   const validator = getGlobalValidator();
   const [initialContent, setInitialContent] = useState<Record<string, unknown>[] | null>(null);
@@ -193,6 +194,23 @@ export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
   useEffect(() => {
     if (!editor) return;
 
+    const blockExternalPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") {
+        e.stopImmediatePropagation();
+      }
+
+      toast.error("External paste is blocked. You can only paste content from within this system.", {
+        duration: 4000,
+        position: "top-center",
+        style: {
+          background: "#EF4444",
+          color: "#fff",
+        },
+      });
+    };
+
     const handleCopy = () => {
       const copiedContent = window.getSelection()?.toString();
 
@@ -203,37 +221,42 @@ export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
     };
 
     const handlePaste = (e: ClipboardEvent) => {
-      const pastedContent = e.clipboardData?.getData("text/plain");
+      const pastedContent = e.clipboardData?.getData("text/plain")?.trim() || "";
+      const tracker = trackerRef.current;
 
-      if (!pastedContent) return;
+      if (!pastedContent) {
+        if (tracker) {
+          tracker.trackPaste("[non-text clipboard content]", false);
+        }
+
+        // In strict mode, non-text clipboard payloads are treated as external content and blocked.
+        if (strictPasteBlocking) {
+          blockExternalPaste(e);
+        }
+        return;
+      }
 
       const isInternal = validator.validatePaste(pastedContent);
 
       // Track the paste event
-      const tracker = trackerRef.current;
       if (tracker) {
         tracker.trackPaste(pastedContent, isInternal);
       }
 
       if (!isInternal) {
-        // Block external paste
-        e.preventDefault();
-        toast.error("External paste is blocked. You can only paste content from within this system.", {
-          duration: 4000,
-          position: "top-center",
-          style: {
-            background: "#EF4444",
-            color: "#fff",
-          },
-        });
+        // Allow external paste when strict blocking is disabled. Logs are still recorded.
+        if (strictPasteBlocking) {
+          blockExternalPaste(e);
+        }
       } else {
         // Clear the copy buffer after successful paste
         validator.clearCopyBuffer();
       }
     };
 
-    // Get the BlockNote editor DOM element
-    const editorElement = document.querySelector(".blocknote-wrapper");
+    // Bind directly to the editable node and capture early for reliable logging/blocking.
+    const editorElement = document.querySelector<HTMLElement>(".blocknote-wrapper [contenteditable='true']")
+      || document.querySelector<HTMLElement>(".blocknote-wrapper");
 
     if (!editorElement) {
       console.warn("BlockNote editor element not found");
@@ -242,13 +265,13 @@ export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
 
     // Add copy and paste listeners to the editor element
     editorElement.addEventListener("copy", handleCopy);
-    editorElement.addEventListener("paste", handlePaste as EventListener);
+    editorElement.addEventListener("paste", handlePaste as EventListener, true);
 
     return () => {
       editorElement.removeEventListener("copy", handleCopy);
-      editorElement.removeEventListener("paste", handlePaste as EventListener);
+      editorElement.removeEventListener("paste", handlePaste as EventListener, true);
     };
-  }, [validator, editor]);
+  }, [validator, editor, strictPasteBlocking]);
 
   if (isLoading) {
     return (

@@ -613,7 +613,14 @@ export default function ReplayPlayer({
     }
 
     prevVisibleReplayPasteHighlightCountRef.current = visibleCount;
-    setVisibleReplayPasteHighlights(replayPasteHighlights.slice(0, visibleCount));
+    if (visibleCount === 0) {
+      setVisibleReplayPasteHighlights([]);
+      return;
+    }
+
+    // Show only the most recent paste highlight for the current playback time.
+    const mostRecentHighlight = replayPasteHighlights[visibleCount - 1];
+    setVisibleReplayPasteHighlights(mostRecentHighlight ? [mostRecentHighlight] : []);
   }, [replayPasteHighlights, currentTime]);
 
   const renderWordCountTooltip = useCallback(

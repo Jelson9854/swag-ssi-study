@@ -36,7 +36,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { title, instructions, deadline, customSystemPrompt, includeInstructionInPrompt, allowWebSearch } = body;
+    const {
+      title,
+      instructions,
+      deadline,
+      customSystemPrompt,
+      includeInstructionInPrompt,
+      allowWebSearch,
+      strictPasteBlocking,
+    } = body;
 
     // Validate required fields
     if (!title || !instructions || !deadline) {
@@ -75,6 +83,7 @@ export async function POST(request: Request) {
       customSystemPrompt: customSystemPrompt || null,
       includeInstructionInPrompt: includeInstructionInPrompt || false,
       allowWebSearch: allowWebSearch || false,
+      strictPasteBlocking: strictPasteBlocking || false,
       createdAt: new Date(),
     });
 

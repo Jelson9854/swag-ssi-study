@@ -93,7 +93,7 @@ export default async function EditorPage({ params }: EditorPageProps) {
       assignmentInstructions={assignment.instructions}
       deadline={assignment.deadline}
       allowWebSearch={assignment.allowWebSearch ?? false}
+      strictPasteBlocking={assignment.strictPasteBlocking ?? false}
     />
   );
 }
-

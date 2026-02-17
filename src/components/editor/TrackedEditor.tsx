@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 
 interface TrackedEditorProps {
   sessionId: string;
+  strictPasteBlocking: boolean;
 }
 
 // Dynamic import to ensure client-side only rendering
@@ -17,6 +18,6 @@ const BlockNoteEditor = dynamic(() => import("./BlockNoteEditor"), {
   ),
 });
 
-export default function TrackedEditor({ sessionId }: TrackedEditorProps) {
-  return <BlockNoteEditor sessionId={sessionId} />;
+export default function TrackedEditor({ sessionId, strictPasteBlocking }: TrackedEditorProps) {
+  return <BlockNoteEditor sessionId={sessionId} strictPasteBlocking={strictPasteBlocking} />;
 }

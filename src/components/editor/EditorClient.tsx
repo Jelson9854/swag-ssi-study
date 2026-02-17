@@ -18,9 +18,18 @@ interface EditorClientProps {
   assignmentInstructions: string;
   deadline: Date;
   allowWebSearch: boolean;
+  strictPasteBlocking: boolean;
 }
 
-export default function EditorClient({ sessionId, assignmentId, assignmentTitle, assignmentInstructions, deadline, allowWebSearch }: EditorClientProps) {
+export default function EditorClient({
+  sessionId,
+  assignmentId,
+  assignmentTitle,
+  assignmentInstructions,
+  deadline,
+  allowWebSearch,
+  strictPasteBlocking,
+}: EditorClientProps) {
   const {
     isChatOpen,
     chatWidth,
@@ -155,6 +164,13 @@ export default function EditorClient({ sessionId, assignmentId, assignmentTitle,
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">
                   Due: {deadline.toLocaleDateString()}
                 </p>
+                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+                  strictPasteBlocking
+                    ? 'border-red-200 bg-red-50 text-red-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}>
+                  {strictPasteBlocking ? 'External Paste: Blocked' : 'External Paste: Allowed'}
+                </span>
                 <span className="text-[hsl(var(--border))]">•</span>
                 <Button
                   onClick={toggleInstructions}
@@ -235,7 +251,7 @@ export default function EditorClient({ sessionId, assignmentId, assignmentTitle,
           {/* Editor */}
           <div className="flex-1 overflow-auto p-6">
             <div className="max-w-4xl mx-auto">
-              <TrackedEditor sessionId={sessionId} />
+              <TrackedEditor sessionId={sessionId} strictPasteBlocking={strictPasteBlocking} />
             </div>
           </div>
         </div>

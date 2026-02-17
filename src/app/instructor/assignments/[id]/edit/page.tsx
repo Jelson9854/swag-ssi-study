@@ -24,6 +24,7 @@ interface Assignment {
   customSystemPrompt: string | null;
   includeInstructionInPrompt: boolean;
   allowWebSearch: boolean;
+  strictPasteBlocking: boolean;
 }
 
 export default function EditAssignmentPage() {
@@ -74,6 +75,7 @@ export default function EditAssignmentPage() {
       customSystemPrompt: formData.get('customSystemPrompt') as string || null,
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
+      strictPasteBlocking: formData.get('strictPasteBlocking') === 'on',
     };
 
     try {
@@ -258,6 +260,29 @@ export default function EditAssignmentPage() {
                   <br />
                   <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
                     Recommended only if external research is required.
+                  </span>
+                </p>
+              </div>
+
+              {/* Strict Paste Blocking Toggle */}
+              <div className="p-4 bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] rounded-lg">
+                <div className="flex items-center gap-3 mb-2">
+                  <input
+                    type="checkbox"
+                    id="strictPasteBlocking"
+                    name="strictPasteBlocking"
+                    defaultChecked={assignment.strictPasteBlocking}
+                    className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
+                  />
+                  <label htmlFor="strictPasteBlocking" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
+                    Strictly Block External Paste
+                  </label>
+                </div>
+                <p className="text-sm text-[hsl(var(--muted-foreground))] ml-7">
+                  When enabled, external clipboard content is blocked before it can be inserted into the student editor.
+                  <br />
+                  <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
+                    Use this for assignments that require fully in-system drafting.
                   </span>
                 </p>
               </div>

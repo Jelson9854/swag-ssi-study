@@ -46,7 +46,7 @@ export default function ChatMessages({
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastAutoScrolledHighlightCountRef = useRef(0);
+  const lastAutoScrolledHighlightIdRef = useRef<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
   const validator = getGlobalValidator();
 
@@ -80,18 +80,17 @@ export default function ChatMessages({
 
   // When a new replay paste highlight appears, bring that highlight near top for easier scanning.
   useEffect(() => {
-    const currentCount = replayPasteHighlights.length;
-    if (currentCount === 0) {
-      lastAutoScrolledHighlightCountRef.current = 0;
+    const latestHighlight = replayPasteHighlights[replayPasteHighlights.length - 1];
+    if (!latestHighlight) {
+      lastAutoScrolledHighlightIdRef.current = null;
       return;
     }
 
-    if (currentCount <= lastAutoScrolledHighlightCountRef.current) {
+    if (lastAutoScrolledHighlightIdRef.current === latestHighlight.id) {
       return;
     }
 
-    lastAutoScrolledHighlightCountRef.current = currentCount;
-    const latestHighlight = replayPasteHighlights[currentCount - 1];
+    lastAutoScrolledHighlightIdRef.current = latestHighlight.id;
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer || !latestHighlight) {
       return;

@@ -38,6 +38,7 @@ export const assignments = pgTable('assignments', {
   customSystemPrompt: text('custom_system_prompt'), // nullable
   includeInstructionInPrompt: boolean('include_instruction_in_prompt').default(false),
   allowWebSearch: boolean('allow_web_search').default(false),
+  strictPasteBlocking: boolean('strict_paste_blocking').default(false),
   createdAt: timestamp('created_at').notNull(),
 });
 
