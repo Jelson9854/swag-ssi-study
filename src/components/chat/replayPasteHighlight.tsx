@@ -187,6 +187,7 @@ const renderHighlightedText = (
         key={`${match.highlight.id}-${match.start}-${index}`}
         type="button"
         className="inline rounded-sm bg-amber-200/90 px-0.5 text-amber-950 underline decoration-amber-500/70 underline-offset-2 hover:bg-amber-300 transition-colors"
+        style={{ textAlign: 'inherit' }}
         data-tooltip-id="timeline-tooltip"
         data-tooltip-html={`<div style="max-width: 220px;"><div class="font-semibold text-emerald-300">Internal Paste</div><div class="text-xs text-gray-300 mt-1">at ${match.highlight.timeLabel}</div></div>`}
         aria-label={`Internal paste at ${match.highlight.timeLabel}`}

@@ -162,6 +162,39 @@ const getPasteRouteLabel = (event: EditorEvent): string => {
   return `${pasteAreaLabel(sourceArea)} -> ${pasteAreaLabel(targetArea)}`;
 };
 
+const formatClockDuration = (totalSeconds: number): string => {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const paddedMinutes = minutes.toString().padStart(2, '0');
+  const seconds = safeSeconds % 60;
+  const paddedSeconds = seconds.toString().padStart(2, '0');
+
+  if (hours > 0) {
+    return `${hours}:${paddedMinutes}:${paddedSeconds}`;
+  }
+
+  return `${minutes}:${paddedSeconds}`;
+};
+
+const formatBreakDuration = (totalSeconds: number): string => {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const days = Math.floor(safeSeconds / 86400);
+  const hours = Math.floor((safeSeconds % 86400) / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return `${minutes}m ${seconds}s`;
+};
+
 export default function ReplayPlayer({
   events,
   chatMessages,
@@ -221,9 +254,9 @@ export default function ReplayPlayer({
 
   const duration = endTime - startTime;
 
-  // Detect idle periods FIRST (gaps > 1 minute with no activity)
+  // Detect idle periods FIRST (gaps > 3 minutes with no activity)
   const idlePeriods = useMemo(() => {
-    const IDLE_THRESHOLD = 60 * 1000; // 1 minute
+    const IDLE_THRESHOLD = 3 * 60 * 1000; // 3 minutes
     const allEventTimes: number[] = [];
 
     // Collect all event timestamps
@@ -244,11 +277,9 @@ export default function ReplayPlayer({
     for (let i = 0; i < allEventTimes.length - 1; i++) {
       const gap = allEventTimes[i + 1] - allEventTimes[i];
       if (gap > IDLE_THRESHOLD) {
-        const totalSeconds = Math.floor(gap / 1000);
-        // 앞뒤 5초씩은 항상 표시하고, 나머지를 압축
-        const EDGE_SECONDS = 5;
-        const compressibleSeconds = Math.max(0, totalSeconds - (EDGE_SECONDS * 2));
-        const compressedMs = compressibleSeconds * 1000;
+        // Break는 replay 시간축에서 0초로 취급한다.
+        const EDGE_SECONDS = 0;
+        const compressedMs = Math.max(0, gap - (EDGE_SECONDS * 2 * 1000));
 
         periods.push({
           start: allEventTimes[i],
@@ -263,7 +294,7 @@ export default function ReplayPlayer({
     return periods;
   }, [events, chatMessages]);
 
-  // Calculate compressed timeline (remove idle periods, keeping only edges)
+  // Calculate compressed timeline (remove idle periods, collapsing breaks)
   const getCompressedTime = useCallback((realTime: number) => {
     let compressed = realTime - startTime;
 
@@ -516,13 +547,12 @@ export default function ReplayPlayer({
     setCurrentTime(timestamp);
   }, []);
 
-  // Format time for display
-  const formatTime = useCallback((ms: number) => {
-    const seconds = Math.floor((ms - startTime) / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-  }, [startTime]);
+  // Format replay clock time (breaks are compressed to 0s)
+  const formatReplayTime = useCallback((ms: number) => {
+    const compressedMs = getCompressedTime(ms);
+    const totalSeconds = Math.max(0, Math.floor((compressedMs - startTime) / 1000));
+    return formatClockDuration(totalSeconds);
+  }, [getCompressedTime, startTime]);
 
   const snapshotWordCounts = useMemo<WordCountSnapshot[]>(() => {
     const snapshots = events
@@ -541,7 +571,7 @@ export default function ReplayPlayer({
         percentage: 0,
         wordCount: 0,
         time: startTime,
-        timeFormatted: formatTime(startTime),
+        timeFormatted: formatReplayTime(startTime),
       }];
     }
 
@@ -567,17 +597,32 @@ export default function ReplayPlayer({
         percentage,
         wordCount: currentWordCount,
         time: realTime,
-        timeFormatted: formatTime(realTime),
+        timeFormatted: formatReplayTime(realTime),
       });
     }
 
     return sampled;
-  }, [compressedDuration, startTime, getRealTime, snapshotWordCounts, formatTime]);
+  }, [compressedDuration, startTime, getRealTime, snapshotWordCounts, formatReplayTime]);
 
   const maxWordCount = useMemo(() => {
     if (wordCountGraphData.length === 0) return 1;
     return Math.max(...wordCountGraphData.map((point) => point.wordCount), 1);
   }, [wordCountGraphData]);
+
+  const breakGraphMarkerPositions = useMemo(() => {
+    if (compressedDuration <= 0) {
+      return [];
+    }
+
+    return idlePeriods
+      .map((idle) => {
+        const markerTime = idle.start + (idle.edgeSeconds * 1000);
+        const compressedMarkerTime = getCompressedTime(markerTime);
+        const position = ((compressedMarkerTime - startTime) / compressedDuration) * 100;
+        return Math.max(0, Math.min(100, position));
+      })
+      .filter((position) => Number.isFinite(position));
+  }, [compressedDuration, getCompressedTime, idlePeriods, startTime]);
 
   const replayPasteHighlights = useMemo<ReplayPasteHighlight[]>(() => {
     const searchableMessages = chatMessages.map((message) => ({
@@ -622,12 +667,12 @@ export default function ReplayPlayer({
           messageId: matchedMessage.id,
           snippet: pastedContent,
           timestamp: event.timestamp,
-          timeLabel: formatTime(event.timestamp),
+          timeLabel: formatReplayTime(event.timestamp),
         });
       });
 
     return highlights;
-  }, [chatMessages, events, formatTime]);
+  }, [chatMessages, events, formatReplayTime]);
 
   useEffect(() => {
     let left = 0;
@@ -648,14 +693,7 @@ export default function ReplayPlayer({
     }
 
     prevVisibleReplayPasteHighlightCountRef.current = visibleCount;
-    if (visibleCount === 0) {
-      setVisibleReplayPasteHighlights([]);
-      return;
-    }
-
-    // Show only the most recent paste highlight for the current playback time.
-    const mostRecentHighlight = replayPasteHighlights[visibleCount - 1];
-    setVisibleReplayPasteHighlights(mostRecentHighlight ? [mostRecentHighlight] : []);
+    setVisibleReplayPasteHighlights(replayPasteHighlights.slice(0, visibleCount));
   }, [replayPasteHighlights, currentTime]);
 
   const renderWordCountTooltip = useCallback(
@@ -745,7 +783,7 @@ export default function ReplayPlayer({
           type: 'chat',
           label: 'Chat Message',
           content: msg.content.length > 100 ? msg.content.slice(0, 100) + '...' : msg.content,
-          time: formatTime(msg.timestamp),
+          time: formatReplayTime(msg.timestamp),
         });
       }
     });
@@ -764,7 +802,7 @@ export default function ReplayPlayer({
           type: event.eventType,
           label: event.eventType === 'paste_external' ? 'External Paste' : 'Internal Paste',
           content: pasteContent.length > 100 ? pasteContent.slice(0, 100) + '...' : pasteContent,
-          time: formatTime(event.timestamp),
+          time: formatReplayTime(event.timestamp),
           route,
         });
       });
@@ -781,48 +819,64 @@ export default function ReplayPlayer({
           type: 'submission',
           label: `Submission ${i + 1}`,
           content: '',
-          time: formatTime(event.timestamp),
+          time: formatReplayTime(event.timestamp),
         });
       });
 
     return timelineMarkers;
-  }, [chatMessages, compressedDuration, events, formatTime, getCompressedTime, startTime]);
+  }, [chatMessages, compressedDuration, events, formatReplayTime, getCompressedTime, startTime]);
 
-  // Get typing sessions from all events (to match idle period calculation)
+  // Get typing sessions from editor writing events only (exclude chat-only activity)
   const typingSessions = useMemo(() => {
-    // Use same event list as idle period calculation for consistency
-    const allEventTimes: number[] = [];
-    events.forEach(e => allEventTimes.push(e.timestamp));
-    chatMessages.forEach(m => allEventTimes.push(m.timestamp));
-    allEventTimes.sort((a, b) => a - b);
+    const writingEventTimes: number[] = [];
+    let previousSnapshotWordCount = 0;
+
+    events.forEach((event) => {
+      if (event.eventType === 'snapshot') {
+        const currentSnapshotWordCount = countWordsFromDocument(event.eventData);
+        if (currentSnapshotWordCount !== previousSnapshotWordCount) {
+          writingEventTimes.push(event.timestamp);
+        }
+        previousSnapshotWordCount = currentSnapshotWordCount;
+        return;
+      }
+
+      if (event.eventType === 'paste_internal' || event.eventType === 'paste_external') {
+        const targetArea = (event.eventData as { targetArea?: unknown } | undefined)?.targetArea;
+        if (targetArea !== 'chat') {
+          writingEventTimes.push(event.timestamp);
+        }
+      }
+    });
+    writingEventTimes.sort((a, b) => a - b);
 
     const sessions: Array<{ startTime: number; endTime: number }> = [];
-    const GAP_THRESHOLD = 60 * 1000; // 1 minute gap to match idle period threshold
+    const GAP_THRESHOLD = 10 * 1000; // keep same typing session only within 10 seconds
 
-    if (allEventTimes.length === 0) return sessions;
+    if (writingEventTimes.length === 0) return sessions;
 
     let currentSession = {
-      startTime: allEventTimes[0],
-      endTime: allEventTimes[0],
+      startTime: writingEventTimes[0],
+      endTime: writingEventTimes[0],
     };
 
-    for (let i = 1; i < allEventTimes.length; i++) {
-      const timeSinceLastEvent = allEventTimes[i] - currentSession.endTime;
+    for (let i = 1; i < writingEventTimes.length; i++) {
+      const timeSinceLastEvent = writingEventTimes[i] - currentSession.endTime;
 
       if (timeSinceLastEvent <= GAP_THRESHOLD) {
-        currentSession.endTime = allEventTimes[i];
+        currentSession.endTime = writingEventTimes[i];
       } else {
         sessions.push(currentSession);
         currentSession = {
-          startTime: allEventTimes[i],
-          endTime: allEventTimes[i],
+          startTime: writingEventTimes[i],
+          endTime: writingEventTimes[i],
         };
       }
     }
 
     sessions.push(currentSession);
     return sessions;
-  }, [events, chatMessages]);
+  }, [events]);
 
   // Get all navigable events
   const navigableEvents = useMemo(() => {
@@ -839,7 +893,7 @@ export default function ReplayPlayer({
         time: session.startTime,
         type: 'typing_start',
         label: `Typing Session ${i + 1}`,
-        description: `Started at ${formatTime(session.startTime)}`,
+        description: `Started at ${formatReplayTime(session.startTime)}`,
       });
     });
 
@@ -864,7 +918,7 @@ export default function ReplayPlayer({
           time: event.timestamp,
           type: event.eventType as 'paste_internal' | 'paste_external',
           label: event.eventType === 'paste_external' ? `External Paste ${i + 1}` : `Internal Paste ${i + 1}`,
-          description: `${routeLabel} at ${formatTime(event.timestamp)}`,
+          description: `${routeLabel} at ${formatReplayTime(event.timestamp)}`,
         });
       });
 
@@ -876,13 +930,13 @@ export default function ReplayPlayer({
           time: event.timestamp,
           type: 'submission',
           label: `Submission ${i + 1}`,
-          description: `At ${formatTime(event.timestamp)}`,
+          description: `At ${formatReplayTime(event.timestamp)}`,
         });
       });
 
     // Sort by time
     return navEvents.sort((a, b) => a.time - b.time);
-  }, [typingSessions, chatMessages, events, formatTime]);
+  }, [typingSessions, chatMessages, events, formatReplayTime]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -978,8 +1032,10 @@ export default function ReplayPlayer({
             </Button>
 
             {/* Time Display */}
-            <div className="text-sm text-[hsl(var(--foreground))] font-mono w-32 tabular-nums">
-              {formatTime(currentTime)} / {formatTime(endTime)}
+            <div className="text-sm text-[hsl(var(--foreground))] font-mono w-44 tabular-nums">
+              <span className="whitespace-nowrap">
+                {formatReplayTime(currentTime)} / {formatReplayTime(endTime)}
+              </span>
               {idlePeriods.length > 0 && (
                 <div className="text-xs text-[hsl(var(--muted-foreground))]">
                   ({idlePeriods.length} breaks)
@@ -1020,6 +1076,16 @@ export default function ReplayPlayer({
                         content={renderWordCountTooltip}
                         cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
                       />
+                      {breakGraphMarkerPositions.map((position, i) => (
+                        <ReferenceLine
+                          key={`break-graph-marker-${i}`}
+                          x={position}
+                          stroke="#111827"
+                          strokeWidth={1.2}
+                          strokeOpacity={0.9}
+                          strokeDasharray="2 2"
+                        />
+                      ))}
                       <ReferenceLine
                         x={clampedProgress}
                         stroke="#ef4444"
@@ -1048,9 +1114,11 @@ export default function ReplayPlayer({
                 const startPos = ((compressedStart - startTime) / compressedDuration) * 100;
                 const endPos = ((compressedEnd - startTime) / compressedDuration) * 100;
                 const width = endPos - startPos;
-                const durationMs = session.endTime - session.startTime;
-                const durationMin = Math.floor(durationMs / 60000);
-                const durationSec = Math.floor((durationMs % 60000) / 1000);
+                const replayDurationSeconds = Math.max(
+                  0,
+                  Math.floor((compressedEnd - compressedStart) / 1000)
+                );
+                const replayDurationLabel = formatClockDuration(replayDurationSeconds);
 
                 return (
                   <div
@@ -1061,7 +1129,7 @@ export default function ReplayPlayer({
                       width: `${Math.max(width, 0.5)}%`,
                     }}
                     data-tooltip-id="timeline-tooltip"
-                    data-tooltip-html={`<div class="text-center"><div class="font-semibold">Typing Session ${i + 1}</div><div class="text-xs text-gray-300 mt-1">${formatTime(session.startTime)} - ${formatTime(session.endTime)}</div><div class="text-xs text-gray-400">Duration: ${durationMin}m ${durationSec}s</div></div>`}
+                    data-tooltip-html={`<div class="text-center"><div class="font-semibold">Typing Session ${i + 1}</div><div class="text-xs text-gray-300 mt-1">${formatReplayTime(session.startTime)} - ${formatReplayTime(session.endTime)}</div><div class="text-xs text-gray-400">Duration: ${replayDurationLabel}</div></div>`}
                   />
                 );
               })}
@@ -1071,19 +1139,21 @@ export default function ReplayPlayer({
                 const middleStart = idle.start + (idle.edgeSeconds * 1000);
                 const compressedMiddleStart = getCompressedTime(middleStart);
                 const middlePos = ((compressedMiddleStart - startTime) / compressedDuration) * 100;
-                const markerWidth = 2; // 2% width
+                const markerWidth = 1; // narrower break marker
                 const centeredPos = middlePos - (markerWidth / 2);
+                const realBreakDurationSeconds = Math.floor(idle.duration / 1000);
+                const realBreakDurationLabel = formatBreakDuration(realBreakDurationSeconds);
 
                 return (
                   <div key={`idle-${i}`}>
                     <div
-                      className="absolute top-0 h-full bg-[hsl(var(--muted-foreground))] cursor-pointer hover:bg-[hsl(var(--foreground))]"
+                      className="absolute top-0 h-full bg-black/90 cursor-pointer hover:bg-black shadow-[0_0_6px_rgba(0,0,0,0.5)]"
                       style={{
                         left: `${centeredPos}%`,
                         width: `${markerWidth}%`,
                       }}
                       data-tooltip-id="timeline-tooltip"
-                      data-tooltip-html={`<div class="text-center"><div class="font-semibold">Break</div><div class="text-xs text-gray-300 mt-1">${Math.floor(idle.duration / 60000)}m ${Math.floor((idle.duration % 60000) / 1000)}s</div><div class="text-xs text-gray-400">Student was inactive</div></div>`}
+                      data-tooltip-html={`<div class="text-center"><div class="font-semibold">Break</div><div class="text-xs text-gray-300 mt-1">${realBreakDurationLabel}</div><div class="text-xs text-gray-400">Student was inactive</div></div>`}
                     />
                   </div>
                 );
@@ -1110,14 +1180,14 @@ export default function ReplayPlayer({
                     : marker.type === 'paste_internal'
                       ? 'bg-emerald-500'
                       : marker.type === 'submission'
-                        ? 'bg-orange-500'
+                        ? 'bg-blue-600'
                         : 'bg-purple-500'
                     }`}
                   style={{ left: `${marker.position}%` }}
                   data-tooltip-id="timeline-tooltip"
                   data-tooltip-html={`<div style="max-width: 250px;"><div class="font-semibold ${marker.type === 'paste_external' ? 'text-red-300' :
                     marker.type === 'paste_internal' ? 'text-green-300' :
-                      marker.type === 'submission' ? 'text-orange-300' : 'text-purple-300'
+                      marker.type === 'submission' ? 'text-blue-300' : 'text-purple-300'
                     }">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.route ? `<div class="text-xs text-gray-300 mt-1">${marker.route}</div>` : ''}${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''
                     }</div>`}
                 />
@@ -1188,12 +1258,12 @@ export default function ReplayPlayer({
               <span>External Paste</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-orange-500 rounded" />
+              <div className="w-3 h-3 bg-blue-600 rounded" />
               <span>Submission</span>
             </div>
             {idlePeriods.length > 0 && (
               <div className="flex items-center gap-1">
-                <div className="w-3 h-2 bg-[hsl(var(--muted-foreground))] rounded" />
+                <div className="w-3 h-2 bg-black rounded" />
                 <span>Break (compressed)</span>
               </div>
             )}
@@ -1242,7 +1312,7 @@ export default function ReplayPlayer({
                           case 'chat': return <MessageSquare className="w-4 h-4 text-purple-500" />;
                           case 'paste_internal': return <ClipboardCopy className="w-4 h-4 text-emerald-500" />;
                           case 'paste_external': return <AlertTriangle className="w-4 h-4 text-destructive" />;
-                          case 'submission': return <Send className="w-4 h-4 text-orange-500" />;
+                          case 'submission': return <Send className="w-4 h-4 text-blue-600" />;
                           default: return null;
                         }
                       };
@@ -1268,7 +1338,7 @@ export default function ReplayPlayer({
                                     </p>
                                     <span className={`text-xs font-mono whitespace-nowrap ${isPast ? 'text-[hsl(var(--primary))]' : 'text-[hsl(var(--muted-foreground))]'
                                       }`}>
-                                      {formatTime(event.time)}
+                                      {formatReplayTime(event.time)}
                                     </span>
                                   </div>
                                   <p className="text-xs text-[hsl(var(--muted-foreground))] truncate mt-0.5">
@@ -1305,7 +1375,7 @@ export default function ReplayPlayer({
                     ? 'bg-red-100 text-red-700 border border-red-200'
                     : currentEvent.type === 'paste_internal'
                       ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : 'bg-orange-100 text-orange-700 border border-orange-200'
+                      : 'bg-blue-100 text-blue-700 border border-blue-200'
                 }`}
               >
                 {currentEvent.type === 'paste_external' && <AlertTriangle className="w-4 h-4" />}
