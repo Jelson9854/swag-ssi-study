@@ -32,13 +32,21 @@ const getWordCount = (value: string): number => {
   return value.trim().split(/\s+/).filter(Boolean).length;
 };
 
+const hasListMarkers = (value: string): boolean => {
+  return /(^|\n)\s*(?:[-*+]|\d+[.)])\s+/.test(value);
+};
+
 const buildCandidateSnippets = (rawSnippet: string): string[] => {
   const candidates = new Set<string>();
+  const snippetContainsList = hasListMarkers(rawSnippet);
 
-  const addCandidate = (value: string) => {
+  const addCandidate = (value: string, options?: { allowShort?: boolean }) => {
     const trimmed = value.trim();
     const words = getWordCount(trimmed);
-    const isStrongEnough = trimmed.length >= 10 && (words >= 3 || trimmed.length >= 20);
+    const allowShort = options?.allowShort ?? false;
+    const isStrongEnough = allowShort
+      ? trimmed.length >= 6 && (words >= 2 || trimmed.length >= 12)
+      : trimmed.length >= 10 && (words >= 3 || trimmed.length >= 20);
     if (isStrongEnough) {
       candidates.add(trimmed);
     }
@@ -61,16 +69,23 @@ const buildCandidateSnippets = (rawSnippet: string): string[] => {
       return;
     }
 
-    addCandidate(line);
-    addCandidate(line.replace(/\s+/g, ' ').trim());
-    addCandidate(line.replace(/[`*_#>|[\]()-]/g, ' ').replace(/\s+/g, ' ').trim());
+    const listItemMatch = line.match(/^(?:[-*+]|\d+[.)])\s+(.+)$/);
+    const baseLine = listItemMatch ? listItemMatch[1] : line;
+    const allowShortForLine = snippetContainsList && Boolean(listItemMatch);
+
+    addCandidate(baseLine, { allowShort: allowShortForLine });
+    addCandidate(baseLine.replace(/\s+/g, ' ').trim(), { allowShort: allowShortForLine });
+    addCandidate(
+      baseLine.replace(/[`*_#>|[\]()-]/g, ' ').replace(/\s+/g, ' ').trim(),
+      { allowShort: allowShortForLine }
+    );
 
     if (line.includes('|')) {
       const cells = line
         .split('|')
         .map((cell) => cell.trim())
         .filter((cell) => cell.length >= 3 && !/^:?-{2,}:?$/.test(cell));
-      cells.forEach((cell) => addCandidate(cell));
+      cells.forEach((cell) => addCandidate(cell, { allowShort: snippetContainsList }));
     }
   });
 
