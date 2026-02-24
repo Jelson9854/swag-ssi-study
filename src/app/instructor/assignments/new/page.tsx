@@ -50,7 +50,8 @@ export default function NewAssignmentPage() {
         throw new Error(result.error || 'Failed to create assignment');
       }
 
-      router.push('/instructor/dashboard');
+      router.replace('/instructor/dashboard');
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create assignment');
     } finally {

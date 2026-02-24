@@ -23,7 +23,8 @@ export default function DeleteAssignmentButton({ assignmentId }: DeleteAssignmen
       });
 
       if (res.ok) {
-        router.push('/instructor/dashboard');
+        router.replace('/instructor/dashboard');
+        router.refresh();
       } else {
         const data = await res.json();
         alert(data.error || 'Failed to delete assignment');
