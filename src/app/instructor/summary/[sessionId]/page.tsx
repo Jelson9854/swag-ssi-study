@@ -47,7 +47,7 @@ export default async function ViewPage({ params }: PageProps) {
       .select()
       .from(editorEvents)
       .where(eq(editorEvents.sessionId, sessionId))
-      .orderBy(asc(editorEvents.sequenceNumber)),
+      .orderBy(asc(editorEvents.timestamp), asc(editorEvents.sequenceNumber), asc(editorEvents.id)),
     db
       .select()
       .from(chatConversations)
@@ -73,7 +73,7 @@ export default async function ViewPage({ params }: PageProps) {
   const latestSubmission = submissions.length > 0 ? submissions[submissions.length - 1] : null;
 
   // Calculate statistics
-  const totalEditorEvents = events.length;
+  const totalEditorEvents = events.filter(e => e.eventType !== 'typing_op').length;
   const externalPasteAttempts = events.filter(e => e.eventType === 'paste_external').length;
   const internalPastes = events.filter(e => e.eventType === 'paste_internal').length;
 

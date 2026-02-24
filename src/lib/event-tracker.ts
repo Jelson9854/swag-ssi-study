@@ -1,7 +1,12 @@
 import type { PasteMatchMethod, PasteSource } from './copy-validator';
+import {
+  getLegacyPreludeSequenceStorageKey,
+  getSwagSequenceStorageKey,
+  SWAG_CUSTOM_EVENTS,
+} from './swag-events';
 
 export interface EditorEventData {
-  type: 'paste_internal' | 'paste_external' | 'snapshot' | 'submission';
+  type: 'paste_internal' | 'paste_external' | 'snapshot' | 'submission' | 'typing_op';
   timestamp: number;
   sequenceNumber: number;
   data?: unknown;
@@ -15,10 +20,20 @@ export interface PasteEventContext {
   matchMethod?: PasteMatchMethod;
 }
 
+export interface TypingOpContext {
+  stepJson: Record<string, unknown>;
+  stepType?: string;
+  stepIndex?: number;
+  stepCount?: number;
+  transactionTimestamp?: number;
+  wordCount?: number;
+}
+
 export class EventTracker {
   private queue: EditorEventData[] = [];
   private sequenceNumber = 0;
   private sessionId: string;
+  private sequenceStorageKey: string;
   private saveTimer: NodeJS.Timeout | null = null;
   private lastSnapshotTime = Date.now();
   private lastActivityTime = 0;
@@ -27,10 +42,68 @@ export class EventTracker {
   private snapshotCallback: (() => void) | null = null;
   private inactivityTimer: NodeJS.Timeout | null = null;
   private keystrokeCount = 0; // 키 입력 카운터
-  private KEYSTROKES_PER_SNAPSHOT = 10; // 10번 입력마다 snapshot
+  private lastSnapshotSequenceNumber = -1;
+  private KEYSTROKES_PER_SNAPSHOT = 80; // 80번 입력마다 snapshot
+  private INACTIVITY_SNAPSHOT_DELAY_MS = 3000;
+  private MIN_SNAPSHOT_INTERVAL_MS = 15000;
+  private BATCH_FLUSH_MS = 2000;
+  private MAX_BATCH_SIZE = 50;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
+    this.sequenceStorageKey = getSwagSequenceStorageKey(sessionId);
+    this.sequenceNumber = this.loadInitialSequenceNumber();
+  }
+
+  private loadInitialSequenceNumber(): number {
+    if (typeof window === 'undefined') {
+      return 0;
+    }
+
+    const parseStoredValue = (raw: string | null): number | null => {
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < 0) return null;
+      return parsed;
+    };
+
+    const currentValue = parseStoredValue(window.sessionStorage.getItem(this.sequenceStorageKey));
+    if (currentValue !== null) {
+      return currentValue;
+    }
+
+    // One-time fallback for sessions that were tracked under the old prelude key.
+    const legacyKey = getLegacyPreludeSequenceStorageKey(this.sessionId);
+    const legacyValue = parseStoredValue(window.sessionStorage.getItem(legacyKey));
+    if (legacyValue !== null) {
+      window.sessionStorage.setItem(this.sequenceStorageKey, String(legacyValue));
+      window.sessionStorage.removeItem(legacyKey);
+      return legacyValue;
+    }
+
+    return 0;
+  }
+
+  private nextSequenceNumber(): number {
+    const next = this.sequenceNumber;
+    this.sequenceNumber += 1;
+
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(this.sequenceStorageKey, String(this.sequenceNumber));
+    }
+
+    return next;
+  }
+
+  setMinimumSequenceNumber(minSequenceNumber: number) {
+    if (!Number.isFinite(minSequenceNumber)) return;
+    const normalized = Math.max(0, Math.floor(minSequenceNumber));
+    if (normalized <= this.sequenceNumber) return;
+
+    this.sequenceNumber = normalized;
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(this.sequenceStorageKey, String(this.sequenceNumber));
+    }
   }
 
   // 사용자 활동 추적 (throttled)
@@ -46,7 +119,7 @@ export class EventTracker {
     this.activityCount++;
     this.keystrokeCount++; // 키 입력 카운트 증가
 
-    // 타이핑 멈춤 감지: 1초간 입력 없으면 snapshot (유지)
+    // 타이핑 멈춤 감지: 일정 시간 입력 없으면 snapshot
     if (this.inactivityTimer) {
       clearTimeout(this.inactivityTimer);
     }
@@ -55,7 +128,7 @@ export class EventTracker {
       if (this.activityCount > 0 && this.snapshotCallback) {
         this.snapshotCallback();
       }
-    }, 1000); // 1초간 입력 없으면 저장
+    }, this.INACTIVITY_SNAPSHOT_DELAY_MS); // 입력이 멈추면 snapshot 저장
 
     // 키 입력 횟수 기반 저장 (새로 추가)
     if (this.keystrokeCount >= this.KEYSTROKES_PER_SNAPSHOT && this.snapshotCallback) {
@@ -64,16 +137,18 @@ export class EventTracker {
   }
 
   trackSnapshot(documentState: Record<string, unknown>[]) {
+    const snapshotSequenceNumber = this.nextSequenceNumber();
     this.queue.push({
       type: 'snapshot',
       timestamp: Date.now(),
-      sequenceNumber: this.sequenceNumber++,
+      sequenceNumber: snapshotSequenceNumber,
       data: documentState,
     });
 
     this.activityCount = 0;
     this.keystrokeCount = 0; // 키 입력 카운터 리셋
     this.lastSnapshotTime = Date.now();
+    this.lastSnapshotSequenceNumber = snapshotSequenceNumber;
     this.scheduleSave();
   }
 
@@ -81,7 +156,7 @@ export class EventTracker {
     this.queue.push({
       type: 'submission',
       timestamp: Date.now(),
-      sequenceNumber: this.sequenceNumber++,
+      sequenceNumber: this.nextSequenceNumber(),
       data: documentState,
     });
   }
@@ -90,7 +165,7 @@ export class EventTracker {
     this.queue.push({
       type: isInternal ? 'paste_internal' : 'paste_external',
       timestamp: Date.now(),
-      sequenceNumber: this.sequenceNumber++,
+      sequenceNumber: this.nextSequenceNumber(),
       data: {
         content,
         sourceArea: context.sourceArea ?? (isInternal ? 'unknown' : 'external'),
@@ -102,12 +177,34 @@ export class EventTracker {
     this.scheduleSave();
   }
 
+  trackTypingOp(context: TypingOpContext) {
+    const data: Record<string, unknown> = {
+      baseSnapshotSequenceNumber: this.lastSnapshotSequenceNumber,
+      stepJson: context.stepJson,
+    };
+
+    if (context.stepType) data.stepType = context.stepType;
+    if (typeof context.stepIndex === 'number') data.stepIndex = context.stepIndex;
+    if (typeof context.stepCount === 'number') data.stepCount = context.stepCount;
+    if (typeof context.transactionTimestamp === 'number') data.transactionTimestamp = context.transactionTimestamp;
+    if (typeof context.wordCount === 'number') data.wordCount = context.wordCount;
+
+    this.queue.push({
+      type: 'typing_op',
+      timestamp: Date.now(),
+      sequenceNumber: this.nextSequenceNumber(),
+      data,
+    });
+
+    this.scheduleSave();
+  }
+
   shouldTakeSnapshot(): boolean {
-    // 키 입력 횟수 기반 또는 활동이 있고 3초 이상 지났으면 snapshot
+    // 키 입력 횟수 기반 또는 활동이 있고 최소 간격이 지났으면 snapshot
     const timeSinceSnapshot = Date.now() - this.lastSnapshotTime;
     return (
       this.activityCount > 0 &&
-      (this.keystrokeCount >= this.KEYSTROKES_PER_SNAPSHOT || timeSinceSnapshot >= 3000)
+      (this.keystrokeCount >= this.KEYSTROKES_PER_SNAPSHOT || timeSinceSnapshot >= this.MIN_SNAPSHOT_INTERVAL_MS)
     );
   }
 
@@ -125,14 +222,14 @@ export class EventTracker {
     ) {
       // 즉시 저장
       this.flush();
-    } else if (this.queue.length >= 10) {
-      // 10개 이벤트 모이면 저장
+    } else if (this.queue.length >= this.MAX_BATCH_SIZE) {
+      // 배치 크기에 도달하면 저장
       this.flush();
     } else if (!this.saveTimer) {
-      // 그 외에는 5초 후 저장 (30초 → 5초로 단축)
+      // 그 외에는 짧은 지연 후 배치 저장
       this.saveTimer = setTimeout(() => {
         this.flush();
-      }, 5000);
+      }, this.BATCH_FLUSH_MS);
     }
   }
 
@@ -149,7 +246,7 @@ export class EventTracker {
 
     // Dispatch saving event
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('prelude:events-saving'));
+      window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.EVENTS_SAVING));
     }
 
     try {
@@ -174,7 +271,7 @@ export class EventTracker {
 
       // Dispatch saved event for UI update
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('prelude:events-saved'));
+        window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.EVENTS_SAVED));
       }
     } catch (error) {
       console.error('Failed to save events:', error);

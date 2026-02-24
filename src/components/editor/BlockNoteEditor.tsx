@@ -7,6 +7,7 @@ import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
 import { EventTracker, getSessionEventTracker } from "@/lib/event-tracker";
 import { getGlobalValidator } from "@/lib/copy-validator";
+import { SWAG_CUSTOM_EVENTS } from "@/lib/swag-events";
 import toast from "react-hot-toast";
 
 interface BlockNoteEditorProps {
@@ -14,11 +15,55 @@ interface BlockNoteEditorProps {
   strictPasteBlocking: boolean;
 }
 
+const extractBlockText = (value: unknown): string => {
+  const parts: string[] = [];
+
+  const walk = (node: unknown, parentKey?: string) => {
+    if (typeof node === "string") {
+      if (parentKey === "text" || parentKey === "content") {
+        parts.push(node);
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach((child) => walk(child, parentKey));
+      return;
+    }
+
+    if (node && typeof node === "object") {
+      Object.entries(node as Record<string, unknown>).forEach(([key, child]) => {
+        walk(child, key);
+      });
+    }
+  };
+
+  walk(value);
+  return parts.join(" ");
+};
+
+const countWords = (document: unknown): number => {
+  const plainText = extractBlockText(document).replace(/\s+/g, " ").trim();
+  if (!plainText) {
+    return 0;
+  }
+  return plainText.split(" ").length;
+};
+
 export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
+  const hasLoadedSnapshotRef = useRef(false);
+  const initialSnapshotSeededRef = useRef(false);
   const validator = getGlobalValidator();
   const [initialContent, setInitialContent] = useState<Record<string, unknown>[] | null>(null);
+  const [maxExistingSequence, setMaxExistingSequence] = useState<number>(-1);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    hasLoadedSnapshotRef.current = false;
+    initialSnapshotSeededRef.current = false;
+    setMaxExistingSequence(-1);
+  }, [sessionId]);
 
   // Load snapshot on mount
   useEffect(() => {
@@ -34,12 +79,18 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
           throw new Error('Failed to load snapshot');
         }
 
-        const { snapshot } = await response.json();
+        const { snapshot, maxSequenceNumber } = await response.json();
+        const parsedMaxSequence = Number(maxSequenceNumber);
+        setMaxExistingSequence(
+          Number.isFinite(parsedMaxSequence) ? Math.max(-1, Math.floor(parsedMaxSequence)) : -1
+        );
 
         if (snapshot && Array.isArray(snapshot) && snapshot.length > 0) {
+          hasLoadedSnapshotRef.current = true;
           setInitialContent(snapshot);
           console.log('✓ Loaded snapshot with', snapshot.length, 'blocks');
         } else {
+          hasLoadedSnapshotRef.current = false;
           // No snapshot found, use default
           setInitialContent([
             {
@@ -50,6 +101,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
         }
       } catch (error) {
         console.error('Failed to load snapshot:', error);
+        hasLoadedSnapshotRef.current = false;
         // Fallback to default content
         setInitialContent([
           {
@@ -93,7 +145,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       trackerRef.current?.forceSave();
     };
 
-    // 주기적으로 snapshot 체크 (1초마다) - 연속 타이핑 중 3초마다 저장용
+    // 주기적으로 snapshot 체크 (1초마다)
     const snapshotCheckInterval = setInterval(() => {
       const tracker = trackerRef.current;
       if (tracker && tracker.shouldTakeSnapshot() && editor) {
@@ -115,6 +167,29 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
     };
   }, [sessionId, editor]);
 
+  // Ensure sequence numbers continue from the latest value in DB.
+  useEffect(() => {
+    const tracker = trackerRef.current;
+    if (!tracker) return;
+    tracker.setMinimumSequenceNumber(maxExistingSequence + 1);
+  }, [maxExistingSequence, sessionId]);
+
+  // Ensure a baseline snapshot exists before typing starts in fresh sessions.
+  useEffect(() => {
+    if (isLoading || !editor) return;
+    if (hasLoadedSnapshotRef.current || initialSnapshotSeededRef.current) return;
+
+    const tracker = trackerRef.current;
+    if (!tracker) return;
+
+    try {
+      tracker.trackSnapshot(editor.document);
+      initialSnapshotSeededRef.current = true;
+    } catch (error) {
+      console.error("Failed to create initial baseline snapshot:", error);
+    }
+  }, [editor, isLoading, sessionId]);
+
   // Listen for submission requests from the UI
   useEffect(() => {
     const handleSubmissionRequest = async () => {
@@ -125,7 +200,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
         const documentState = editor.document;
         tracker.trackSubmission(documentState);
         await tracker.forceSave();
-        window.dispatchEvent(new CustomEvent('prelude:submission-saved'));
+        window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.SUBMISSION_SAVED));
         toast.success("Submitted! You can resubmit anytime before the deadline.", {
           duration: 3000,
           position: "top-center",
@@ -139,9 +214,9 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       }
     };
 
-    window.addEventListener("prelude:submit-request", handleSubmissionRequest);
+    window.addEventListener(SWAG_CUSTOM_EVENTS.SUBMIT_REQUEST, handleSubmissionRequest);
     return () => {
-      window.removeEventListener("prelude:submit-request", handleSubmissionRequest);
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.SUBMIT_REQUEST, handleSubmissionRequest);
     };
   }, [editor]);
 
@@ -158,7 +233,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       return;
     }
 
-    // Track user activity
+    // Track user activity + ProseMirror step logs
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleUpdate = ({ transaction }: any) => {
       if (!transaction.docChanged) return;
@@ -166,13 +241,41 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       const tracker = trackerRef.current;
       if (!tracker) return;
 
+      const txTimestamp = Date.now();
+      const steps = Array.isArray(transaction.steps) ? transaction.steps : [];
+      const currentWordCount = countWords(editor.document);
+      steps.forEach((step: unknown, stepIndex: number) => {
+        try {
+          const stepObject = step as { toJSON?: () => unknown };
+          if (typeof stepObject.toJSON !== "function") return;
+
+          const stepJsonRaw = stepObject.toJSON();
+          if (!stepJsonRaw || typeof stepJsonRaw !== "object") return;
+
+          const stepJson = stepJsonRaw as Record<string, unknown>;
+          const stepType =
+            typeof stepJson.stepType === "string" ? stepJson.stepType : "unknown";
+
+          tracker.trackTypingOp({
+            stepJson,
+            stepType,
+            stepIndex,
+            stepCount: steps.length,
+            transactionTimestamp: txTimestamp,
+            wordCount: currentWordCount,
+          });
+        } catch {
+          // Ignore step serialization failures and continue processing update.
+        }
+      });
+
       // Track activity (throttled to 1 per second)
       tracker.trackActivity();
 
       // Notify that editor has changed (for submit button state)
-      window.dispatchEvent(new CustomEvent('prelude:editor-changed'));
+      window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.EDITOR_CHANGED));
 
-      // Take snapshot if needed (activity-based, every 5 seconds)
+      // Take snapshot if needed based on activity/interval thresholds.
       if (tracker.shouldTakeSnapshot()) {
         try {
           const documentState = editor.document;

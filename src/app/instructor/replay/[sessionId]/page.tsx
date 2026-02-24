@@ -47,7 +47,7 @@ export default async function ReplayPage({ params }: PageProps) {
       .select()
       .from(editorEvents)
       .where(eq(editorEvents.sessionId, sessionId))
-      .orderBy(asc(editorEvents.sequenceNumber)),
+      .orderBy(asc(editorEvents.timestamp), asc(editorEvents.sequenceNumber), asc(editorEvents.id)),
     db
       .select()
       .from(chatConversations)

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 
 const eventSchema = z.object({
-  type: z.enum(['paste_internal', 'paste_external', 'snapshot', 'submission']),
+  type: z.enum(['paste_internal', 'paste_external', 'snapshot', 'submission', 'typing_op']),
   timestamp: z.number(),
   sequenceNumber: z.number(),
   data: z.any().optional(),

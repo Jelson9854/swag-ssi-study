@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { useCreateBlockNote } from '@blocknote/react';
+import { Step } from '@tiptap/pm/transform';
 import {
   Area,
   AreaChart,
@@ -68,7 +69,7 @@ interface ReplayPlayerProps {
 
 const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
 
-interface WordCountSnapshot {
+interface WordCountTimelineEntry {
   timestamp: number;
   wordCount: number;
 }
@@ -79,6 +80,54 @@ interface WordCountGraphPoint {
   time: number;
   timeFormatted: string;
 }
+
+interface TypingOpEventData {
+  stepJson?: Record<string, unknown>;
+  stepType?: string;
+  stepIndex?: number;
+  stepCount?: number;
+  transactionTimestamp?: number;
+  wordCount?: number;
+}
+
+interface ReplayTypingOpEvent extends EditorEvent {
+  replayTimestamp: number;
+}
+
+const findLastEventIndexAtOrBefore = (items: Array<{ timestamp: number }>, timestamp: number): number => {
+  let left = 0;
+  let right = items.length;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (items[mid].timestamp <= timestamp) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  return left - 1;
+};
+
+const findLastReplayTypingIndexAtOrBefore = (
+  items: ReplayTypingOpEvent[],
+  replayTimestamp: number
+): number => {
+  let left = 0;
+  let right = items.length;
+
+  while (left < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (items[mid].replayTimestamp <= replayTimestamp) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+
+  return left - 1;
+};
 
 const extractBlockNoteText = (value: unknown): string => {
   const parts: string[] = [];
@@ -216,21 +265,29 @@ export default function ReplayPlayer({
   // Replay-specific state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(startTime);
-  const [speed, setSpeed] = useState(5); // Default 5x speed
+  const [speed, setSpeed] = useState(5); // Keep existing default speed
   const [editorDocument, setEditorDocument] = useState<Record<string, unknown>[]>([
     { type: 'paragraph', content: [] }
   ]);
+  const [replayBaseSnapshotId, setReplayBaseSnapshotId] = useState<number | null>(null);
+  const [replayTypingOps, setReplayTypingOps] = useState<ReplayTypingOpEvent[]>([]);
   const [visibleMessages, setVisibleMessages] = useState<ChatMessage[]>([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   const [visibleReplayPasteHighlights, setVisibleReplayPasteHighlights] = useState<ReplayPasteHighlight[]>([]);
   const [isEditorReady, setIsEditorReady] = useState(false);
   const [isWordCountGraphExpanded, setIsWordCountGraphExpanded] = useState(true);
+  const [stepReplayFailureCount, setStepReplayFailureCount] = useState(0);
+  const [lastStepReplayFailure, setLastStepReplayFailure] = useState<string | null>(null);
   const prevVisibleMessagesCountRef = useRef<number>(0);
   const prevVisibleReplayPasteHighlightCountRef = useRef<number>(0);
+  const lastAppliedTypingSnapshotKeyRef = useRef<string>('init');
+  const lastAppliedTypingSeqRef = useRef<number>(-1);
+  const loggedStepFailureSeqsRef = useRef<Set<number>>(new Set());
   const wordCountGradientId = useId();
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
+  const lastReplayFrameKeyRef = useRef<string>('');
 
   // Create BlockNote editor for replay
   const editor = useCreateBlockNote({
@@ -253,6 +310,79 @@ export default function ReplayPlayer({
   }, [editor]);
 
   const duration = endTime - startTime;
+
+  const snapshotEvents = useMemo(
+    () => events.filter((event) => event.eventType === 'snapshot'),
+    [events]
+  );
+
+  const typingOpEventsForReplay = useMemo<ReplayTypingOpEvent[]>(() => {
+    const typingEvents = events.filter((event) => event.eventType === 'typing_op');
+    if (typingEvents.length === 0) {
+      return [];
+    }
+
+    const MIN_TYPING_GAP_MS = 75;
+    const MAX_TYPING_DRIFT_MS = 1200;
+    let previousReplayTimestamp = Number.NEGATIVE_INFINITY;
+
+    return typingEvents.map((event) => {
+      let replayTimestamp = event.timestamp;
+      if (previousReplayTimestamp > Number.NEGATIVE_INFINITY) {
+        replayTimestamp = Math.max(replayTimestamp, previousReplayTimestamp + MIN_TYPING_GAP_MS);
+      }
+
+      const maxAllowedTimestamp = event.timestamp + MAX_TYPING_DRIFT_MS;
+      if (replayTimestamp > maxAllowedTimestamp) {
+        replayTimestamp = maxAllowedTimestamp;
+      }
+
+      if (replayTimestamp <= previousReplayTimestamp) {
+        replayTimestamp = previousReplayTimestamp + 1;
+      }
+
+      previousReplayTimestamp = replayTimestamp;
+      return {
+        ...event,
+        replayTimestamp,
+      };
+    });
+  }, [events]);
+
+  const findNearestSnapshot = useCallback((time: number) => {
+    const snapshotIndex = findLastEventIndexAtOrBefore(snapshotEvents, time);
+    if (snapshotIndex < 0) {
+      return undefined;
+    }
+    return snapshotEvents[snapshotIndex];
+  }, [snapshotEvents]);
+
+  const getTypingOpsInWindow = useCallback((
+    startExclusive: number,
+    endInclusive: number,
+    snapshotId: number | null
+  ) => {
+    if (typingOpEventsForReplay.length === 0 || endInclusive < startExclusive) {
+      return [];
+    }
+
+    const endIndex = findLastReplayTypingIndexAtOrBefore(typingOpEventsForReplay, endInclusive);
+    if (endIndex < 0) {
+      return [];
+    }
+
+    let startIndex = findLastReplayTypingIndexAtOrBefore(typingOpEventsForReplay, startExclusive);
+    startIndex = Math.max(startIndex + 1, 0);
+
+    if (startIndex > endIndex) {
+      return [];
+    }
+
+    const candidateEvents = typingOpEventsForReplay.slice(startIndex, endIndex + 1);
+    return snapshotId !== null
+      ? candidateEvents.filter((event) => event.id > snapshotId)
+      : candidateEvents;
+  }, [typingOpEventsForReplay]);
 
   // Detect idle periods FIRST (gaps > 3 minutes with no activity)
   const idlePeriods = useMemo(() => {
@@ -365,14 +495,6 @@ export default function ReplayPlayer({
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, handleResize, stopResize]);
-
-  // Find the nearest snapshot before current time
-  const findNearestSnapshot = useCallback((time: number) => {
-    const snapshots = events.filter(
-      e => e.eventType === 'snapshot' && e.timestamp <= time
-    );
-    return snapshots[snapshots.length - 1];
-  }, [events]);
 
   // Rebuild editor content up to current time
   const rebuildContent = useCallback((time: number) => {
@@ -490,8 +612,25 @@ export default function ReplayPlayer({
   useEffect(() => {
     const content = rebuildContent(currentTime);
     setEditorDocument(content);
+    const snapshot = findNearestSnapshot(currentTime);
+    const snapshotTimestamp = snapshot?.timestamp ?? startTime;
+    const snapshotId = snapshot?.id ?? null;
+    const typingOpsUntilNow = getTypingOpsInWindow(
+      snapshotTimestamp,
+      currentTime,
+      snapshotId
+    );
+    const latestTypingSeq = typingOpsUntilNow.length > 0
+      ? typingOpsUntilNow[typingOpsUntilNow.length - 1].sequenceNumber
+      : -1;
+    const frameKey = `${snapshot?.id ?? 'none'}:${latestTypingSeq}`;
+    if (frameKey !== lastReplayFrameKeyRef.current) {
+      lastReplayFrameKeyRef.current = frameKey;
+      setReplayBaseSnapshotId(snapshot?.id ?? null);
+      setReplayTypingOps(typingOpsUntilNow);
+    }
     updateVisibleMessages(currentTime);
-  }, [currentTime, rebuildContent, updateVisibleMessages]);
+  }, [currentTime, rebuildContent, updateVisibleMessages, findNearestSnapshot, getTypingOpsInWindow, startTime]);
 
   // Update editor when document changes
   useEffect(() => {
@@ -505,18 +644,105 @@ export default function ReplayPlayer({
         return; // Editor not fully mounted yet
       }
 
-      // Prevent updates if content is the same
-      const currentDoc = editor.document;
-      if (JSON.stringify(currentDoc) === JSON.stringify(editorDocument)) {
-        return;
+      const snapshotKey = replayBaseSnapshotId === null ? 'none' : `snapshot-${replayBaseSnapshotId}`;
+      const latestTypingSeq = replayTypingOps.length > 0
+        ? replayTypingOps[replayTypingOps.length - 1].sequenceNumber
+        : -1;
+      const shouldResetBase =
+        snapshotKey !== lastAppliedTypingSnapshotKeyRef.current ||
+        latestTypingSeq < lastAppliedTypingSeqRef.current;
+
+      if (shouldResetBase) {
+        editor.replaceBlocks(editor.document, editorDocument);
+        lastAppliedTypingSeqRef.current = -1;
       }
 
-      editor.replaceBlocks(editor.document, editorDocument);
+      const typingOpsToApply = shouldResetBase
+        ? replayTypingOps
+        : replayTypingOps.filter((typingEvent) => typingEvent.sequenceNumber > lastAppliedTypingSeqRef.current);
+
+      const newFailureLogs: Array<{
+        sequenceNumber: number;
+        stepType: string;
+        timestamp: number;
+        errorMessage: string;
+      }> = [];
+
+      if (typingOpsToApply.length > 0) {
+        typingOpsToApply.forEach((typingEvent) => {
+          const data = (typingEvent.eventData || {}) as TypingOpEventData;
+
+          const registerFailure = (error: unknown) => {
+            if (loggedStepFailureSeqsRef.current.has(typingEvent.sequenceNumber)) {
+              return;
+            }
+            loggedStepFailureSeqsRef.current.add(typingEvent.sequenceNumber);
+            const stepType = typeof data.stepType === 'string'
+              ? data.stepType
+              : 'unknown';
+            const errorMessage = error instanceof Error
+              ? error.message
+              : (typeof error === 'string' ? error : 'Unknown step apply error');
+            newFailureLogs.push({
+              sequenceNumber: typingEvent.sequenceNumber,
+              stepType,
+              timestamp: typingEvent.timestamp,
+              errorMessage,
+            });
+          };
+
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const state = (tiptapEditor as any).state;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const view = (tiptapEditor as any).view;
+            if (!state || !view) {
+              return;
+            }
+
+            if (!data.stepJson || typeof data.stepJson !== 'object') {
+              registerFailure('Missing stepJson in typing_op event');
+              return;
+            }
+
+            try {
+              const step = Step.fromJSON(state.schema, data.stepJson);
+              const tr = state.tr.step(step);
+              if (tr.docChanged) {
+                view.dispatch(tr);
+              }
+            } catch (error) {
+              registerFailure(error);
+            }
+          } catch (error) {
+            registerFailure(error);
+            // If an op fails, continue with the rest and rely on the next snapshot to self-heal.
+          }
+        });
+      }
+
+      if (newFailureLogs.length > 0) {
+        setStepReplayFailureCount(loggedStepFailureSeqsRef.current.size);
+        const latestFailure = newFailureLogs[newFailureLogs.length - 1];
+        setLastStepReplayFailure(`${latestFailure.stepType} (seq ${latestFailure.sequenceNumber})`);
+
+        newFailureLogs.forEach((failure) => {
+          console.warn('[replay] typing_op apply failed', {
+            sequenceNumber: failure.sequenceNumber,
+            timestamp: failure.timestamp,
+            stepType: failure.stepType,
+            error: failure.errorMessage,
+          });
+        });
+      }
+
+      lastAppliedTypingSnapshotKeyRef.current = snapshotKey;
+      lastAppliedTypingSeqRef.current = latestTypingSeq;
     } catch (error) {
       // Silently ignore editor update errors during replay
       console.debug('Editor update skipped:', error);
     }
-  }, [editor, isEditorReady, editorDocument]);
+  }, [editor, isEditorReady, editorDocument, replayTypingOps, replayBaseSnapshotId]);
 
   const seekToPercentage = useCallback((percentage: number) => {
     if (compressedDuration <= 0) return;
@@ -554,60 +780,91 @@ export default function ReplayPlayer({
     return formatClockDuration(totalSeconds);
   }, [getCompressedTime, startTime]);
 
-  const snapshotWordCounts = useMemo<WordCountSnapshot[]>(() => {
-    const snapshots = events
-      .filter((event) => event.eventType === 'snapshot')
-      .sort((a, b) => a.timestamp - b.timestamp);
+  const wordCountTimeline = useMemo<WordCountTimelineEntry[]>(() => {
+    const timeline: WordCountTimelineEntry[] = [{ timestamp: startTime, wordCount: 0 }];
+    let currentWordCount = 0;
 
-    return snapshots.map((snapshot) => ({
-      timestamp: snapshot.timestamp,
-      wordCount: countWordsFromDocument(snapshot.eventData),
-    }));
-  }, [events]);
+    const sortedEvents = [...events].sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      if (a.sequenceNumber !== b.sequenceNumber) return a.sequenceNumber - b.sequenceNumber;
+      return a.id - b.id;
+    });
+
+    sortedEvents.forEach((event) => {
+      if (event.eventType === 'snapshot') {
+        currentWordCount = countWordsFromDocument(event.eventData);
+        timeline.push({ timestamp: event.timestamp, wordCount: currentWordCount });
+        return;
+      }
+
+      if (event.eventType === 'typing_op') {
+        const typingData = (event.eventData || {}) as TypingOpEventData;
+        const nextWordCount = Number(typingData.wordCount);
+        if (Number.isFinite(nextWordCount) && nextWordCount >= 0) {
+          currentWordCount = Math.floor(nextWordCount);
+          timeline.push({ timestamp: event.timestamp, wordCount: currentWordCount });
+        }
+      }
+    });
+
+    timeline.push({ timestamp: endTime, wordCount: currentWordCount });
+
+    const dedupedByTimestamp: WordCountTimelineEntry[] = [];
+    timeline.forEach((entry) => {
+      const last = dedupedByTimestamp[dedupedByTimestamp.length - 1];
+      if (!last || last.timestamp !== entry.timestamp) {
+        dedupedByTimestamp.push(entry);
+      } else {
+        dedupedByTimestamp[dedupedByTimestamp.length - 1] = entry;
+      }
+    });
+
+    return dedupedByTimestamp;
+  }, [events, startTime, endTime]);
 
   const wordCountGraphData = useMemo<WordCountGraphPoint[]>(() => {
     if (compressedDuration <= 0) {
+      const fallbackWordCount = wordCountTimeline[wordCountTimeline.length - 1]?.wordCount ?? 0;
       return [{
         percentage: 0,
-        wordCount: 0,
+        wordCount: fallbackWordCount,
         time: startTime,
         timeFormatted: formatReplayTime(startTime),
       }];
     }
 
-    const sampled: WordCountGraphPoint[] = [];
-    const sampleCount = 100;
-    let snapshotIndex = 0;
-    let currentWordCount = 0;
+    const points = wordCountTimeline.map((entry) => {
+      const compressedTime = getCompressedTime(entry.timestamp);
+      const percentage = ((compressedTime - startTime) / compressedDuration) * 100;
+      return {
+        percentage: Math.max(0, Math.min(100, percentage)),
+        wordCount: entry.wordCount,
+        time: entry.timestamp,
+        timeFormatted: formatReplayTime(entry.timestamp),
+      };
+    });
 
-    for (let i = 0; i <= sampleCount; i++) {
-      const percentage = (i / sampleCount) * 100;
-      const compressedTime = startTime + (compressedDuration * percentage) / 100;
-      const realTime = getRealTime(compressedTime);
-
-      while (
-        snapshotIndex < snapshotWordCounts.length &&
-        snapshotWordCounts[snapshotIndex].timestamp <= realTime
-      ) {
-        currentWordCount = snapshotWordCounts[snapshotIndex].wordCount;
-        snapshotIndex += 1;
+    const dedupedByPercentage: WordCountGraphPoint[] = [];
+    points.forEach((point) => {
+      const last = dedupedByPercentage[dedupedByPercentage.length - 1];
+      if (!last || Math.abs(last.percentage - point.percentage) > 0.001) {
+        dedupedByPercentage.push(point);
+      } else {
+        dedupedByPercentage[dedupedByPercentage.length - 1] = point;
       }
+    });
 
-      sampled.push({
-        percentage,
-        wordCount: currentWordCount,
-        time: realTime,
-        timeFormatted: formatReplayTime(realTime),
-      });
-    }
-
-    return sampled;
-  }, [compressedDuration, startTime, getRealTime, snapshotWordCounts, formatReplayTime]);
+    return dedupedByPercentage;
+  }, [compressedDuration, formatReplayTime, getCompressedTime, startTime, wordCountTimeline]);
 
   const maxWordCount = useMemo(() => {
     if (wordCountGraphData.length === 0) return 1;
     return Math.max(...wordCountGraphData.map((point) => point.wordCount), 1);
   }, [wordCountGraphData]);
+
+  const hasWordCountData = useMemo(() => (
+    wordCountGraphData.length > 1 || wordCountGraphData.some((point) => point.wordCount > 0)
+  ), [wordCountGraphData]);
 
   const breakGraphMarkerPositions = useMemo(() => {
     if (compressedDuration <= 0) {
@@ -743,6 +1000,17 @@ export default function ReplayPlayer({
         };
       }
 
+      if (event.eventType === 'typing_op') {
+        const typingData = (event.eventData || {}) as TypingOpEventData;
+        const stepTypeLabel = typeof typingData.stepType === 'string' ? typingData.stepType : null;
+        return {
+          type: 'typing_op',
+          label: 'Typing Step',
+          detail: stepTypeLabel,
+          timestamp: event.timestamp,
+        };
+      }
+
       if (event.eventType === 'submission') {
         return {
           type: 'submission',
@@ -829,15 +1097,10 @@ export default function ReplayPlayer({
   // Get typing sessions from editor writing events only (exclude chat-only activity)
   const typingSessions = useMemo(() => {
     const writingEventTimes: number[] = [];
-    let previousSnapshotWordCount = 0;
 
     events.forEach((event) => {
-      if (event.eventType === 'snapshot') {
-        const currentSnapshotWordCount = countWordsFromDocument(event.eventData);
-        if (currentSnapshotWordCount !== previousSnapshotWordCount) {
-          writingEventTimes.push(event.timestamp);
-        }
-        previousSnapshotWordCount = currentSnapshotWordCount;
+      if (event.eventType === 'typing_op') {
+        writingEventTimes.push(event.timestamp);
         return;
       }
 
@@ -1047,7 +1310,7 @@ export default function ReplayPlayer({
           {/* Timeline Container */}
           <div className="flex-1 flex flex-col gap-1">
             {/* Word Count Graph */}
-            {snapshotWordCounts.length > 0 && (
+            {hasWordCountData && (
               <div
                 className={`overflow-hidden transition-all duration-300 ${
                   isWordCountGraphExpanded ? 'h-28' : 'h-0'
@@ -1267,6 +1530,15 @@ export default function ReplayPlayer({
                 <span>Break (compressed)</span>
               </div>
             )}
+            {stepReplayFailureCount > 0 && (
+              <div className="flex items-center gap-1 text-red-600">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>
+                  Step apply failures: {stepReplayFailureCount}
+                  {lastStepReplayFailure ? ` (${lastStepReplayFailure})` : ''}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Event Navigation Dropdown */}
@@ -1276,7 +1548,7 @@ export default function ReplayPlayer({
               size="sm"
               className="gap-2"
               onClick={() => setIsWordCountGraphExpanded((prev) => !prev)}
-              disabled={snapshotWordCounts.length === 0}
+              disabled={!hasWordCountData}
             >
               <BarChart3 className="w-4 h-4" />
               Word Count
@@ -1375,11 +1647,14 @@ export default function ReplayPlayer({
                     ? 'bg-red-100 text-red-700 border border-red-200'
                     : currentEvent.type === 'paste_internal'
                       ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      : currentEvent.type === 'typing_op'
+                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
                       : 'bg-blue-100 text-blue-700 border border-blue-200'
                 }`}
               >
                 {currentEvent.type === 'paste_external' && <AlertTriangle className="w-4 h-4" />}
                 {currentEvent.type === 'paste_internal' && <ClipboardCopy className="w-4 h-4" />}
+                {currentEvent.type === 'typing_op' && <Keyboard className="w-4 h-4" />}
                 {currentEvent.type === 'submission' && <Send className="w-4 h-4" />}
                 <div className="flex flex-col leading-tight">
                   <span>{currentEvent.label}</span>

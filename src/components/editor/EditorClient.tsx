@@ -11,6 +11,7 @@ import { FileText, History, Send, Bot, Check, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getGlobalValidator } from '@/lib/copy-validator';
+import { SWAG_CUSTOM_EVENTS } from '@/lib/swag-events';
 
 interface EditorClientProps {
   sessionId: string;
@@ -73,11 +74,11 @@ export default function EditorClient({
       setTimeout(() => setSaveStatus('ready'), 2000);
     };
 
-    window.addEventListener('prelude:events-saving', handleSaving);
-    window.addEventListener('prelude:events-saved', handleSaved);
+    window.addEventListener(SWAG_CUSTOM_EVENTS.EVENTS_SAVING, handleSaving);
+    window.addEventListener(SWAG_CUSTOM_EVENTS.EVENTS_SAVED, handleSaved);
     return () => {
-      window.removeEventListener('prelude:events-saving', handleSaving);
-      window.removeEventListener('prelude:events-saved', handleSaved);
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.EVENTS_SAVING, handleSaving);
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.EVENTS_SAVED, handleSaved);
     };
   }, [setSaveStatus]);
 
@@ -114,9 +115,9 @@ export default function EditorClient({
         });
     };
 
-    window.addEventListener('prelude:submission-saved', handleSubmissionSaved);
+    window.addEventListener(SWAG_CUSTOM_EVENTS.SUBMISSION_SAVED, handleSubmissionSaved);
     return () => {
-      window.removeEventListener('prelude:submission-saved', handleSubmissionSaved);
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.SUBMISSION_SAVED, handleSubmissionSaved);
     };
   }, [loadSubmissions]);
 
@@ -126,9 +127,9 @@ export default function EditorClient({
       setHasChangesAfterSubmit(true);
     };
 
-    window.addEventListener('prelude:editor-changed', handleEditorChange);
+    window.addEventListener(SWAG_CUSTOM_EVENTS.EDITOR_CHANGED, handleEditorChange);
     return () => {
-      window.removeEventListener('prelude:editor-changed', handleEditorChange);
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.EDITOR_CHANGED, handleEditorChange);
     };
   }, []);
 
@@ -229,7 +230,7 @@ export default function EditorClient({
               Submissions
             </Button>
             <Button
-              onClick={() => window.dispatchEvent(new CustomEvent('prelude:submit-request'))}
+              onClick={() => window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.SUBMIT_REQUEST))}
               className={hasChangesAfterSubmit ? "" : "opacity-50 cursor-not-allowed"}
               disabled={!hasChangesAfterSubmit}
               title={hasChangesAfterSubmit ? "You can resubmit anytime before the deadline" : "No changes since last submission"}

@@ -70,7 +70,7 @@ export async function POST(request: Request) {
         status: isExisting ? 200 : 201,
         headers: {
           // Set HTTP-only cookie for additional security
-          'Set-Cookie': `prelude_session=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${7 * 24 * 60 * 60}`,
+          'Set-Cookie': `swag_session=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${7 * 24 * 60 * 60}`,
         },
       }
     );
