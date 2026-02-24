@@ -35,6 +35,8 @@ export interface TypingOpContext {
   stepCount?: number;
   transactionTimestamp?: number;
   wordCount?: number;
+  docContentSize?: number;
+  source?: 'user' | 'gpt';
 }
 
 export interface EditorSelectionContext {
@@ -221,6 +223,8 @@ export class EventTracker {
     if (typeof context.stepCount === 'number') data.stepCount = context.stepCount;
     if (typeof context.transactionTimestamp === 'number') data.transactionTimestamp = context.transactionTimestamp;
     if (typeof context.wordCount === 'number') data.wordCount = context.wordCount;
+    if (typeof context.docContentSize === 'number') data.docContentSize = context.docContentSize;
+    if (context.source === 'user' || context.source === 'gpt') data.source = context.source;
 
     this.queue.push({
       type: 'typing_op',

@@ -5,7 +5,7 @@ import { BlockNoteView } from '@blocknote/mantine';
 import { useCreateBlockNote } from '@blocknote/react';
 import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
-import { Step } from '@tiptap/pm/transform';
+import { Step, StepMap } from '@tiptap/pm/transform';
 import {
   Area,
   AreaChart,
@@ -75,11 +75,16 @@ const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
 interface WordCountTimelineEntry {
   timestamp: number;
   wordCount: number;
+  userWordCount: number;
+  gptWordCount: number;
 }
 
 interface WordCountGraphPoint {
   percentage: number;
   wordCount: number;
+  userWordCount: number;
+  gptWordCount: number;
+  gptSharePct: number;
   time: number;
   timeFormatted: string;
 }
@@ -91,6 +96,8 @@ interface TypingOpEventData {
   stepCount?: number;
   transactionTimestamp?: number;
   wordCount?: number;
+  docContentSize?: number;
+  source?: 'user' | 'gpt';
 }
 
 interface EditorSelectionEventData {
@@ -126,6 +133,19 @@ interface ReplayTypingOpEvent extends EditorEvent {
 interface ReplaySelectionOverlayState {
   from: number;
   to: number;
+}
+
+type AuthorshipOrigin = 'user' | 'gpt';
+
+interface AuthorshipRange {
+  from: number;
+  to: number;
+  origin: AuthorshipOrigin;
+}
+
+interface ReplayAuthorshipOverlayState {
+  enabled: boolean;
+  ranges: AuthorshipRange[];
 }
 
 const findLastEventIndexAtOrBefore = (items: Array<{ timestamp: number }>, timestamp: number): number => {
@@ -169,6 +189,149 @@ const clampPmPosition = (position: number, maxPosition: number): number => {
 };
 
 const replaySelectionPluginKey = new PluginKey<ReplaySelectionOverlayState | null>('replaySelectionOverlay');
+const replayAuthorshipPluginKey = new PluginKey<ReplayAuthorshipOverlayState>('replayAuthorshipOverlay');
+
+const mergeAuthorshipRanges = (ranges: AuthorshipRange[]): AuthorshipRange[] => {
+  if (ranges.length === 0) return [];
+
+  const normalized = ranges
+    .filter((range) => Number.isFinite(range.from) && Number.isFinite(range.to) && range.to > range.from)
+    .map((range) => ({
+      ...range,
+      from: Math.floor(range.from),
+      to: Math.floor(range.to),
+    }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+
+  if (normalized.length === 0) return [];
+
+  const merged: AuthorshipRange[] = [normalized[0]];
+  for (let i = 1; i < normalized.length; i += 1) {
+    const current = normalized[i];
+    const last = merged[merged.length - 1];
+
+    if (current.from <= last.to && current.origin === last.origin) {
+      last.to = Math.max(last.to, current.to);
+      continue;
+    }
+
+    merged.push(current);
+  }
+
+  return merged;
+};
+
+const normalizeAuthorshipRangesForDoc = (
+  ranges: AuthorshipRange[],
+  maxPosition: number
+): AuthorshipRange[] => {
+  if (maxPosition <= 0) return [];
+
+  return mergeAuthorshipRanges(
+    ranges
+      .map((range) => ({
+        from: clampPmPosition(range.from, maxPosition),
+        to: clampPmPosition(range.to, maxPosition),
+        origin: range.origin,
+      }))
+      .filter((range) => range.to > range.from)
+  );
+};
+
+const computeGptShareFromAuthorshipRanges = (
+  ranges: AuthorshipRange[],
+  docContentSize: number
+): number => {
+  if (docContentSize <= 0) return 0;
+
+  const normalized = normalizeAuthorshipRangesForDoc(ranges, docContentSize);
+  const gptSpan = normalized.reduce((sum, range) => (
+    range.origin === 'gpt' ? sum + (range.to - range.from) : sum
+  ), 0);
+
+  return Math.max(0, Math.min(1, gptSpan / docContentSize));
+};
+
+const removeAuthorshipRange = (
+  ranges: AuthorshipRange[],
+  removeFrom: number,
+  removeTo: number
+): AuthorshipRange[] => {
+  if (removeTo <= removeFrom || ranges.length === 0) return ranges;
+
+  const next: AuthorshipRange[] = [];
+  ranges.forEach((range) => {
+    if (removeTo <= range.from || removeFrom >= range.to) {
+      next.push(range);
+      return;
+    }
+
+    if (range.from < removeFrom) {
+      next.push({
+        from: range.from,
+        to: removeFrom,
+        origin: range.origin,
+      });
+    }
+
+    if (removeTo < range.to) {
+      next.push({
+        from: removeTo,
+        to: range.to,
+        origin: range.origin,
+      });
+    }
+  });
+
+  return mergeAuthorshipRanges(next);
+};
+
+const mapAuthorshipRangesThroughStepMap = (
+  ranges: AuthorshipRange[],
+  stepMap: StepMap,
+  maxPosition: number
+): AuthorshipRange[] => {
+  const mapped: AuthorshipRange[] = [];
+
+  ranges.forEach((range) => {
+    const from = clampPmPosition(stepMap.map(range.from, 1), maxPosition);
+    const to = clampPmPosition(stepMap.map(range.to, -1), maxPosition);
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    if (end > start) {
+      mapped.push({
+        from: start,
+        to: end,
+        origin: range.origin,
+      });
+    }
+  });
+
+  return mergeAuthorshipRanges(mapped);
+};
+
+const applyStepToAuthorshipRanges = (
+  ranges: AuthorshipRange[],
+  stepMap: StepMap,
+  origin: AuthorshipOrigin,
+  maxPosition: number
+): AuthorshipRange[] => {
+  let next = mapAuthorshipRangesThroughStepMap(ranges, stepMap, maxPosition);
+
+  stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+    const from = clampPmPosition(newStart, maxPosition);
+    const to = clampPmPosition(newEnd, maxPosition);
+    if (to <= from) return;
+    next = removeAuthorshipRange(next, from, to);
+    next.push({
+      from,
+      to,
+      origin,
+    });
+  });
+
+  return mergeAuthorshipRanges(next);
+};
 
 const createReplaySelectionPlugin = () => {
   return new Plugin<ReplaySelectionOverlayState | null>({
@@ -228,6 +391,86 @@ const createReplaySelectionPlugin = () => {
         });
 
         return DecorationSet.create(state.doc, [rangeDecoration]);
+      },
+    },
+  });
+};
+
+const createReplayAuthorshipPlugin = () => {
+  return new Plugin<ReplayAuthorshipOverlayState>({
+    key: replayAuthorshipPluginKey,
+    state: {
+      init: () => ({ enabled: false, ranges: [] }),
+      apply: (tr, value) => {
+        const meta = tr.getMeta(replayAuthorshipPluginKey) as ReplayAuthorshipOverlayState | undefined;
+        return meta ?? value;
+      },
+    },
+    props: {
+      decorations(state) {
+        const overlay = replayAuthorshipPluginKey.getState(state);
+        if (!overlay?.enabled) {
+          return null;
+        }
+
+        const maxPosition = state.doc.content.size;
+        if (maxPosition <= 0) {
+          return null;
+        }
+
+        const normalized = mergeAuthorshipRanges(
+          overlay.ranges
+            .map((range) => ({
+              from: clampPmPosition(range.from, maxPosition),
+              to: clampPmPosition(range.to, maxPosition),
+              origin: range.origin,
+            }))
+            .filter((range) => range.to > range.from)
+        );
+
+        const completed: AuthorshipRange[] = [];
+        let cursor = 0;
+
+        normalized.forEach((range) => {
+          const start = Math.max(cursor, range.from);
+
+          if (start > cursor) {
+            completed.push({
+              from: cursor,
+              to: start,
+              origin: 'user',
+            });
+          }
+
+          if (range.to > start) {
+            completed.push({
+              from: start,
+              to: range.to,
+              origin: range.origin,
+            });
+            cursor = range.to;
+          }
+        });
+
+        if (cursor < maxPosition) {
+          completed.push({
+            from: cursor,
+            to: maxPosition,
+            origin: 'user',
+          });
+        }
+
+        const decorations = completed.map((range) => Decoration.inline(range.from, range.to, {
+          style: range.origin === 'gpt'
+            ? 'background-color: rgba(251, 191, 36, 0.30); border-radius: 2px;'
+            : 'background-color: rgba(34, 197, 94, 0.22); border-radius: 2px;',
+        }));
+
+        if (decorations.length === 0) {
+          return null;
+        }
+
+        return DecorationSet.create(state.doc, decorations);
       },
     },
   });
@@ -348,6 +591,8 @@ const formatBreakDuration = (totalSeconds: number): string => {
   return `${minutes}m ${seconds}s`;
 };
 
+const REPLAY_AUTHORSHIP_HIGHLIGHT_STORAGE_KEY = 'swag:replay:authorship-highlight';
+
 export default function ReplayPlayer({
   events,
   chatMessages,
@@ -381,6 +626,7 @@ export default function ReplayPlayer({
   const [visibleReplayPasteHighlights, setVisibleReplayPasteHighlights] = useState<ReplayPasteHighlight[]>([]);
   const [isEditorReady, setIsEditorReady] = useState(false);
   const [isWordCountGraphExpanded, setIsWordCountGraphExpanded] = useState(true);
+  const [showAuthorshipHighlight, setShowAuthorshipHighlight] = useState(false);
   const [stepReplayFailureCount, setStepReplayFailureCount] = useState(0);
   const [lastStepReplayFailure, setLastStepReplayFailure] = useState<string | null>(null);
   const prevVisibleMessagesCountRef = useRef<number>(0);
@@ -389,12 +635,18 @@ export default function ReplayPlayer({
   const lastAppliedTypingSeqRef = useRef<number>(-1);
   const lastAppliedEditorSelectionKeyRef = useRef<string>('none');
   const replaySelectionPluginRegisteredRef = useRef<boolean>(false);
+  const replayAuthorshipPluginRegisteredRef = useRef<boolean>(false);
+  const authorshipRangesRef = useRef<AuthorshipRange[]>([]);
+  const authorshipVersionRef = useRef<number>(0);
+  const lastAppliedAuthorshipOverlayKeyRef = useRef<string>('init');
   const loggedStepFailureSeqsRef = useRef<Set<number>>(new Set());
-  const wordCountGradientId = useId();
+  const totalWordCountGradientId = useId();
+  const gptWordCountGradientId = useId();
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   const lastReplayFrameKeyRef = useRef<string>('');
+  const lastProcessedReplayTimeRef = useRef<number>(startTime);
 
   // Create BlockNote editor for replay
   const editor = useCreateBlockNote({
@@ -416,9 +668,9 @@ export default function ReplayPlayer({
     }
   }, [editor]);
 
-  // Register replay-only visual selection plugin once.
+  // Register replay-only visual plugins once.
   useEffect(() => {
-    if (!editor || !isEditorReady || replaySelectionPluginRegisteredRef.current) {
+    if (!editor || !isEditorReady) {
       return;
     }
 
@@ -429,14 +681,58 @@ export default function ReplayPlayer({
         return;
       }
 
-      tiptapEditor.registerPlugin(createReplaySelectionPlugin());
-      replaySelectionPluginRegisteredRef.current = true;
+      if (!replaySelectionPluginRegisteredRef.current) {
+        tiptapEditor.registerPlugin(createReplaySelectionPlugin());
+        replaySelectionPluginRegisteredRef.current = true;
+      }
+
+      if (!replayAuthorshipPluginRegisteredRef.current) {
+        tiptapEditor.registerPlugin(createReplayAuthorshipPlugin());
+        replayAuthorshipPluginRegisteredRef.current = true;
+      }
     } catch (error) {
-      console.debug('Replay selection plugin registration skipped:', error);
+      console.debug('Replay plugin registration skipped:', error);
     }
   }, [editor, isEditorReady]);
 
+  let tiptapSchema: Parameters<typeof Step.fromJSON>[0] | null = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tiptapEditor = (editor as any)?._tiptapEditor;
+    tiptapSchema = tiptapEditor?.state?.schema ?? null;
+  } catch {
+    tiptapSchema = null;
+  }
+
   const duration = endTime - startTime;
+  const replaySessionId = useMemo(
+    () => events[0]?.sessionId ?? conversations[0]?.sessionId ?? 'global',
+    [events, conversations]
+  );
+  const authorshipHighlightStorageKey = useMemo(
+    () => `${REPLAY_AUTHORSHIP_HIGHLIGHT_STORAGE_KEY}:${replaySessionId}`,
+    [replaySessionId]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const sessionValue = window.localStorage.getItem(authorshipHighlightStorageKey);
+    const legacyValue = window.localStorage.getItem(REPLAY_AUTHORSHIP_HIGHLIGHT_STORAGE_KEY);
+    const rawValue = sessionValue ?? legacyValue;
+    if (rawValue === null) return;
+
+    const normalized = rawValue.toLowerCase();
+    setShowAuthorshipHighlight(normalized === '1' || normalized === 'true');
+  }, [authorshipHighlightStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      authorshipHighlightStorageKey,
+      showAuthorshipHighlight ? '1' : '0'
+    );
+  }, [authorshipHighlightStorageKey, showAuthorshipHighlight]);
 
   const snapshotEvents = useMemo(
     () => events.filter((event) => event.eventType === 'snapshot'),
@@ -474,6 +770,56 @@ export default function ReplayPlayer({
         replayTimestamp,
       };
     });
+  }, [events]);
+
+  const typingOriginBySequence = useMemo(() => {
+    const origins = new Map<number, AuthorshipOrigin>();
+
+    const gptPasteEvents = events
+      .filter((event) => event.eventType === 'paste_internal')
+      .filter((event) => {
+        const eventData = (event.eventData || {}) as { sourceArea?: unknown; targetArea?: unknown };
+        return (
+          normalizePasteSourceArea(eventData.sourceArea, event.eventType) === 'chat' &&
+          normalizePasteTargetArea(eventData.targetArea) === 'editor'
+        );
+      })
+      .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+    const typingEvents = events
+      .filter((event) => event.eventType === 'typing_op')
+      .sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+    typingEvents.forEach((event) => {
+      const eventData = (event.eventData || {}) as TypingOpEventData;
+      if (eventData.source === 'gpt' || eventData.source === 'user') {
+        origins.set(event.sequenceNumber, eventData.source);
+        return;
+      }
+
+      let matchedGptPaste = false;
+      for (let i = gptPasteEvents.length - 1; i >= 0; i -= 1) {
+        const pasteEvent = gptPasteEvents[i];
+        if (pasteEvent.sequenceNumber > event.sequenceNumber) {
+          continue;
+        }
+
+        const sequenceDelta = event.sequenceNumber - pasteEvent.sequenceNumber;
+        if (sequenceDelta > 40) {
+          break;
+        }
+
+        const timeDelta = event.timestamp - pasteEvent.timestamp;
+        if (timeDelta >= 0 && timeDelta <= 1500) {
+          matchedGptPaste = true;
+          break;
+        }
+      }
+
+      origins.set(event.sequenceNumber, matchedGptPaste ? 'gpt' : 'user');
+    });
+
+    return origins;
   }, [events]);
 
   const findNearestSnapshot = useCallback((time: number) => {
@@ -845,13 +1191,20 @@ export default function ReplayPlayer({
       const latestTypingSeq = replayTypingOps.length > 0
         ? replayTypingOps[replayTypingOps.length - 1].sequenceNumber
         : -1;
+      const isRewind = currentTime < lastProcessedReplayTimeRef.current;
       const shouldResetBase =
         snapshotKey !== lastAppliedTypingSnapshotKeyRef.current ||
-        latestTypingSeq < lastAppliedTypingSeqRef.current;
+        isRewind;
 
       if (shouldResetBase) {
         editor.replaceBlocks(editor.document, editorDocument);
         lastAppliedTypingSeqRef.current = -1;
+        // Preserve existing authorship ranges on forward snapshot transitions
+        // so highlights remain visible over previously written content.
+        if (isRewind && authorshipRangesRef.current.length > 0) {
+          authorshipRangesRef.current = [];
+          authorshipVersionRef.current += 1;
+        }
       }
 
       const typingOpsToApply = shouldResetBase
@@ -906,6 +1259,14 @@ export default function ReplayPlayer({
               const step = Step.fromJSON(state.schema, data.stepJson);
               const tr = state.tr.step(step);
               if (tr.docChanged) {
+                const typingOrigin = typingOriginBySequence.get(typingEvent.sequenceNumber) ?? 'user';
+                authorshipRangesRef.current = applyStepToAuthorshipRanges(
+                  authorshipRangesRef.current,
+                  step.getMap(),
+                  typingOrigin,
+                  tr.doc.content.size
+                );
+                authorshipVersionRef.current += 1;
                 view.dispatch(tr);
               }
             } catch (error) {
@@ -976,8 +1337,28 @@ export default function ReplayPlayer({
         lastAppliedEditorSelectionKeyRef.current = selectionKey;
       }
 
+      // Keep authorship overlay synced with replay frame/toggle state.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authorshipState = (tiptapEditor as any).state;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authorshipView = (tiptapEditor as any).view;
+      const authorshipOverlayKey = `${showAuthorshipHighlight ? 1 : 0}:${authorshipVersionRef.current}`;
+      if (
+        authorshipState &&
+        authorshipView &&
+        authorshipOverlayKey !== lastAppliedAuthorshipOverlayKeyRef.current
+      ) {
+        const authorshipTr = authorshipState.tr.setMeta(replayAuthorshipPluginKey, {
+          enabled: showAuthorshipHighlight,
+          ranges: authorshipRangesRef.current,
+        });
+        authorshipView.dispatch(authorshipTr);
+        lastAppliedAuthorshipOverlayKeyRef.current = authorshipOverlayKey;
+      }
+
       lastAppliedTypingSnapshotKeyRef.current = snapshotKey;
       lastAppliedTypingSeqRef.current = latestTypingSeq;
+      lastProcessedReplayTimeRef.current = currentTime;
     } catch (error) {
       // Silently ignore editor update errors during replay
       console.debug('Editor update skipped:', error);
@@ -986,9 +1367,12 @@ export default function ReplayPlayer({
     editor,
     isEditorReady,
     editorDocument,
+    currentTime,
     replayTypingOps,
     replayBaseSnapshotId,
     replayEditorSelection,
+    showAuthorshipHighlight,
+    typingOriginBySequence,
   ]);
 
   const seekToPercentage = useCallback((percentage: number) => {
@@ -1028,8 +1412,67 @@ export default function ReplayPlayer({
   }, [getCompressedTime, startTime]);
 
   const wordCountTimeline = useMemo<WordCountTimelineEntry[]>(() => {
-    const timeline: WordCountTimelineEntry[] = [{ timestamp: startTime, wordCount: 0 }];
+    const timeline: WordCountTimelineEntry[] = [{
+      timestamp: startTime,
+      wordCount: 0,
+      userWordCount: 0,
+      gptWordCount: 0,
+    }];
+    let userWordCount = 0;
+    let gptWordCount = 0;
     let currentWordCount = 0;
+    let currentDocContentSize = 0;
+    let authorshipRanges: AuthorshipRange[] = [];
+
+    const rebalanceToTotal = (targetTotal: number, preferredOrigin: AuthorshipOrigin) => {
+      const diff = targetTotal - (userWordCount + gptWordCount);
+      if (diff === 0) return;
+
+      if (diff > 0) {
+        if (preferredOrigin === 'gpt') {
+          gptWordCount += diff;
+        } else {
+          userWordCount += diff;
+        }
+        return;
+      }
+
+      let toRemove = -diff;
+      if (preferredOrigin === 'gpt') {
+        const removedFromUser = Math.min(userWordCount, toRemove);
+        userWordCount -= removedFromUser;
+        toRemove -= removedFromUser;
+        if (toRemove > 0) {
+          gptWordCount = Math.max(0, gptWordCount - toRemove);
+        }
+        return;
+      }
+
+      const removedFromGpt = Math.min(gptWordCount, toRemove);
+      gptWordCount -= removedFromGpt;
+      toRemove -= removedFromGpt;
+      if (toRemove > 0) {
+        userWordCount = Math.max(0, userWordCount - toRemove);
+      }
+    };
+
+    const updateCountsFromAuthorshipRanges = (targetTotal: number) => {
+      if (targetTotal <= 0) {
+        userWordCount = 0;
+        gptWordCount = 0;
+        return;
+      }
+
+      if (currentDocContentSize <= 0) {
+        userWordCount = targetTotal;
+        gptWordCount = 0;
+        return;
+      }
+
+      const gptShare = computeGptShareFromAuthorshipRanges(authorshipRanges, currentDocContentSize);
+      gptWordCount = Math.min(targetTotal, Math.max(0, Math.round(targetTotal * gptShare)));
+      userWordCount = Math.max(0, targetTotal - gptWordCount);
+    };
 
     const sortedEvents = [...events].sort((a, b) => {
       if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
@@ -1039,8 +1482,23 @@ export default function ReplayPlayer({
 
     sortedEvents.forEach((event) => {
       if (event.eventType === 'snapshot') {
-        currentWordCount = countWordsFromDocument(event.eventData);
-        timeline.push({ timestamp: event.timestamp, wordCount: currentWordCount });
+        const nextWordCount = Math.max(0, countWordsFromDocument(event.eventData));
+        if (currentWordCount <= 0) {
+          userWordCount = nextWordCount;
+          gptWordCount = 0;
+          if (currentDocContentSize <= 0) {
+            currentDocContentSize = nextWordCount;
+          }
+        } else {
+          updateCountsFromAuthorshipRanges(nextWordCount);
+        }
+        currentWordCount = nextWordCount;
+        timeline.push({
+          timestamp: event.timestamp,
+          wordCount: currentWordCount,
+          userWordCount,
+          gptWordCount,
+        });
         return;
       }
 
@@ -1048,13 +1506,102 @@ export default function ReplayPlayer({
         const typingData = (event.eventData || {}) as TypingOpEventData;
         const nextWordCount = Number(typingData.wordCount);
         if (Number.isFinite(nextWordCount) && nextWordCount >= 0) {
-          currentWordCount = Math.floor(nextWordCount);
-          timeline.push({ timestamp: event.timestamp, wordCount: currentWordCount });
+          const nextTotal = Math.floor(nextWordCount);
+          const origin = typingOriginBySequence.get(event.sequenceNumber) ?? 'user';
+          const loggedDocContentSize = Number(typingData.docContentSize);
+          const hasLoggedDocContentSize = Number.isFinite(loggedDocContentSize) && loggedDocContentSize >= 0;
+          let nextDocContentSize = hasLoggedDocContentSize
+            ? Math.floor(loggedDocContentSize)
+            : null;
+          let appliedStepMap = false;
+
+          if (tiptapSchema && typingData.stepJson && typeof typingData.stepJson === 'object') {
+            try {
+              const step = Step.fromJSON(tiptapSchema, typingData.stepJson);
+              const stepMap = step.getMap();
+
+              if (nextDocContentSize === null) {
+                let inferredDelta = 0;
+                stepMap.forEach((oldStart, oldEnd, newStart, newEnd) => {
+                  inferredDelta += (newEnd - newStart) - (oldEnd - oldStart);
+                });
+
+                const inferredBase = currentDocContentSize > 0
+                  ? currentDocContentSize
+                  : Math.max(1, currentWordCount);
+                nextDocContentSize = Math.max(0, inferredBase + inferredDelta);
+              }
+
+              authorshipRanges = applyStepToAuthorshipRanges(
+                authorshipRanges,
+                stepMap,
+                origin,
+                Math.max(0, nextDocContentSize)
+              );
+              currentDocContentSize = Math.max(0, nextDocContentSize);
+              appliedStepMap = true;
+            } catch {
+              appliedStepMap = false;
+            }
+          }
+
+          if (appliedStepMap) {
+            updateCountsFromAuthorshipRanges(nextTotal);
+          } else {
+            const delta = nextTotal - currentWordCount;
+            if (delta >= 0) {
+              if (origin === 'gpt') {
+                gptWordCount += delta;
+              } else {
+                userWordCount += delta;
+              }
+            } else {
+              let toRemove = -delta;
+              if (origin === 'gpt') {
+                const removedFromGpt = Math.min(gptWordCount, toRemove);
+                gptWordCount -= removedFromGpt;
+                toRemove -= removedFromGpt;
+                if (toRemove > 0) {
+                  const removedFromUser = Math.min(userWordCount, toRemove);
+                  userWordCount -= removedFromUser;
+                }
+              } else {
+                const removedFromUser = Math.min(userWordCount, toRemove);
+                userWordCount -= removedFromUser;
+                toRemove -= removedFromUser;
+                if (toRemove > 0) {
+                  const removedFromGpt = Math.min(gptWordCount, toRemove);
+                  gptWordCount -= removedFromGpt;
+                }
+              }
+            }
+
+            if (nextDocContentSize !== null) {
+              currentDocContentSize = Math.max(0, nextDocContentSize);
+            } else if (currentDocContentSize <= 0 && nextTotal > 0) {
+              currentDocContentSize = nextTotal;
+            }
+
+            rebalanceToTotal(nextTotal, origin);
+          }
+
+          currentWordCount = nextTotal;
+          timeline.push({
+            timestamp: event.timestamp,
+            wordCount: currentWordCount,
+            userWordCount,
+            gptWordCount,
+          });
         }
       }
     });
 
-    timeline.push({ timestamp: endTime, wordCount: currentWordCount });
+    timeline.push({
+      timestamp: endTime,
+      wordCount: currentWordCount,
+      userWordCount,
+      gptWordCount,
+    });
 
     const dedupedByTimestamp: WordCountTimelineEntry[] = [];
     timeline.forEach((entry) => {
@@ -1062,19 +1609,28 @@ export default function ReplayPlayer({
       if (!last || last.timestamp !== entry.timestamp) {
         dedupedByTimestamp.push(entry);
       } else {
-        dedupedByTimestamp[dedupedByTimestamp.length - 1] = entry;
+      dedupedByTimestamp[dedupedByTimestamp.length - 1] = entry;
       }
     });
 
     return dedupedByTimestamp;
-  }, [events, startTime, endTime]);
+  }, [events, startTime, endTime, typingOriginBySequence, tiptapSchema]);
 
   const wordCountGraphData = useMemo<WordCountGraphPoint[]>(() => {
     if (compressedDuration <= 0) {
-      const fallbackWordCount = wordCountTimeline[wordCountTimeline.length - 1]?.wordCount ?? 0;
+      const fallbackEntry = wordCountTimeline[wordCountTimeline.length - 1];
+      const fallbackWordCount = fallbackEntry?.wordCount ?? 0;
+      const fallbackUserWordCount = fallbackEntry?.userWordCount ?? fallbackWordCount;
+      const fallbackGptWordCount = fallbackEntry?.gptWordCount ?? 0;
+      const fallbackGptSharePct = fallbackWordCount > 0
+        ? (fallbackGptWordCount / fallbackWordCount) * 100
+        : 0;
       return [{
         percentage: 0,
         wordCount: fallbackWordCount,
+        userWordCount: fallbackUserWordCount,
+        gptWordCount: fallbackGptWordCount,
+        gptSharePct: fallbackGptSharePct,
         time: startTime,
         timeFormatted: formatReplayTime(startTime),
       }];
@@ -1086,6 +1642,9 @@ export default function ReplayPlayer({
       return {
         percentage: Math.max(0, Math.min(100, percentage)),
         wordCount: entry.wordCount,
+        userWordCount: entry.userWordCount,
+        gptWordCount: entry.gptWordCount,
+        gptSharePct: entry.wordCount > 0 ? (entry.gptWordCount / entry.wordCount) * 100 : 0,
         time: entry.timestamp,
         timeFormatted: formatReplayTime(entry.timestamp),
       };
@@ -1214,7 +1773,12 @@ export default function ReplayPlayer({
       return (
         <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-2 py-1.5 shadow-md">
           <div className="text-xs font-semibold text-[hsl(var(--popover-foreground))]">
-            {point.wordCount} words
+            {point.wordCount} words (total)
+          </div>
+          <div className="text-[11px] text-emerald-700">User: {point.userWordCount}</div>
+          <div className="text-[11px] text-amber-700">GPT: {point.gptWordCount}</div>
+          <div className="text-[11px] text-amber-700/90">
+            GPT share: {point.gptSharePct.toFixed(1)}%
           </div>
           <div className="text-xs text-[hsl(var(--muted-foreground))]">
             at {point.timeFormatted}
@@ -1225,66 +1789,61 @@ export default function ReplayPlayer({
     []
   );
 
-  const currentEvent = useMemo(() => {
-    const EVENT_DISPLAY_DURATION = 3000; // Show event for 3 seconds
-    const lowerBound = currentTime - EVENT_DISPLAY_DURATION;
+  const majorReplayEvents = useMemo(() => {
+    const items: Array<{
+      type: 'chat' | 'paste_internal' | 'paste_external' | 'submission';
+      label: string;
+      detail: string | null;
+      timestamp: number;
+    }> = [];
 
-    for (let i = events.length - 1; i >= 0; i -= 1) {
-      const event = events[i];
-      if (event.timestamp > currentTime) {
-        continue;
-      }
-      if (event.timestamp <= lowerBound) {
-        break;
-      }
+    chatMessages.forEach((msg) => {
+      if (msg.role !== 'user') return;
+      items.push({
+        type: 'chat',
+        label: 'Chat Message',
+        detail: msg.content.length > 80 ? `${msg.content.slice(0, 80)}...` : msg.content,
+        timestamp: msg.timestamp,
+      });
+    });
 
+    events.forEach((event) => {
       if (event.eventType === 'paste_internal' || event.eventType === 'paste_external') {
-        return {
+        items.push({
           type: event.eventType,
           label: event.eventType === 'paste_external' ? 'External Paste' : 'Content Pasted',
           detail: getPasteRouteLabel(event),
           timestamp: event.timestamp,
-        };
-      }
-
-      if (event.eventType === 'editor_selection') {
-        const selectionData = (event.eventData || {}) as EditorSelectionEventData;
-        const from = Number(selectionData.from);
-        const to = Number(selectionData.to);
-        const detail = Number.isFinite(from) && Number.isFinite(to)
-          ? (from === to ? `Cursor ${Math.floor(from)}` : `Selection ${Math.floor(from)}-${Math.floor(to)}`)
-          : null;
-
-        return {
-          type: 'editor_selection',
-          label: 'Cursor / Selection',
-          detail,
-          timestamp: event.timestamp,
-        };
-      }
-
-      if (event.eventType === 'chat_web_search_toggle') {
-        const toggleData = (event.eventData || {}) as ChatWebSearchToggleEventData;
-        return {
-          type: 'chat_web_search_toggle',
-          label: 'Web Search',
-          detail: toggleData.enabled ? 'Enabled' : 'Disabled',
-          timestamp: event.timestamp,
-        };
+        });
+        return;
       }
 
       if (event.eventType === 'submission') {
-        return {
+        items.push({
           type: 'submission',
           label: 'Submitted',
           detail: null,
           timestamp: event.timestamp,
-        };
+        });
       }
+    });
+
+    return items.sort((a, b) => a.timestamp - b.timestamp);
+  }, [chatMessages, events]);
+
+  const currentEvent = useMemo(() => {
+    const EVENT_DISPLAY_DURATION = 3000; // Show event for 3 seconds
+    const lowerBound = currentTime - EVENT_DISPLAY_DURATION;
+
+    for (let i = majorReplayEvents.length - 1; i >= 0; i -= 1) {
+      const event = majorReplayEvents[i];
+      if (event.timestamp > currentTime) continue;
+      if (event.timestamp <= lowerBound) break;
+      return event;
     }
 
     return null;
-  }, [events, currentTime]);
+  }, [majorReplayEvents, currentTime]);
 
   // Get timeline markers for events (using compressed time)
   const markers = useMemo(() => {
@@ -1575,58 +2134,82 @@ export default function ReplayPlayer({
             {hasWordCountData && (
               <div
                 className={`overflow-hidden transition-all duration-300 ${
-                  isWordCountGraphExpanded ? 'h-28' : 'h-0'
+                  isWordCountGraphExpanded ? 'h-32' : 'h-0'
                 }`}
               >
                 <div
-                  className="h-28 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] pl-0.5 py-1 cursor-pointer outline-none focus:outline-none"
+                  className="h-32 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] cursor-pointer outline-none focus:outline-none flex flex-col"
                   onClick={handleWordCountGraphClick}
                   tabIndex={-1}
                 >
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={wordCountGraphData}
-                      margin={{ top: 2, right: 4, left: 0, bottom: 0 }}
-                      style={{ outline: 'none' }}
-                    >
-                      <defs>
-                        <linearGradient id={wordCountGradientId} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#2563eb" stopOpacity={0.06} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="percentage" type="number" domain={[0, 100]} hide />
-                      <YAxis domain={[0, maxWordCount]} hide />
-                      <RechartsTooltip
-                        content={renderWordCountTooltip}
-                        cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
-                      />
-                      {breakGraphMarkerPositions.map((position, i) => (
-                        <ReferenceLine
-                          key={`break-graph-marker-${i}`}
-                          x={position}
-                          stroke="#111827"
-                          strokeWidth={1.2}
-                          strokeOpacity={0.9}
-                          strokeDasharray="2 2"
+                  <div className="px-2 pt-1 text-[10px] text-[hsl(var(--muted-foreground))] flex items-center gap-3">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-2.5 h-2.5 rounded bg-blue-500/80" />
+                      Total
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-2.5 h-2.5 rounded bg-amber-500/80" />
+                      GPT
+                    </span>
+                  </div>
+                  <div className="h-[calc(100%-18px)] pl-0.5 py-0.5">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart
+                        data={wordCountGraphData}
+                        margin={{ top: 2, right: 4, left: 0, bottom: 0 }}
+                        style={{ outline: 'none' }}
+                      >
+                        <defs>
+                          <linearGradient id={totalWordCountGradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#2563eb" stopOpacity={0.35} />
+                            <stop offset="95%" stopColor="#2563eb" stopOpacity={0.06} />
+                          </linearGradient>
+                          <linearGradient id={gptWordCountGradientId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.30} />
+                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="percentage" type="number" domain={[0, 100]} hide />
+                        <YAxis domain={[0, maxWordCount]} hide />
+                        <RechartsTooltip
+                          content={renderWordCountTooltip}
+                          cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
                         />
-                      ))}
-                      <ReferenceLine
-                        x={clampedProgress}
-                        stroke="#ef4444"
-                        strokeWidth={1.2}
-                        strokeDasharray="4 4"
-                      />
-                      <Area
-                        type="stepAfter"
-                        dataKey="wordCount"
-                        stroke="#2563eb"
-                        strokeWidth={1.8}
-                        fill={`url(#${wordCountGradientId})`}
-                        isAnimationActive={false}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                        {breakGraphMarkerPositions.map((position, i) => (
+                          <ReferenceLine
+                            key={`break-word-marker-${i}`}
+                            x={position}
+                            stroke="#111827"
+                            strokeWidth={1.1}
+                            strokeOpacity={0.85}
+                            strokeDasharray="2 2"
+                          />
+                        ))}
+                        <ReferenceLine
+                          x={clampedProgress}
+                          stroke="#ef4444"
+                          strokeWidth={1.2}
+                          strokeDasharray="4 4"
+                        />
+                        <Area
+                          type="stepAfter"
+                          dataKey="wordCount"
+                          stroke="#2563eb"
+                          strokeWidth={1.7}
+                          fill={`url(#${totalWordCountGradientId})`}
+                          isAnimationActive={false}
+                        />
+                        <Area
+                          type="stepAfter"
+                          dataKey="gptWordCount"
+                          stroke="#f59e0b"
+                          strokeWidth={1.7}
+                          fill={`url(#${gptWordCountGradientId})`}
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
               </div>
             )}
@@ -1897,9 +2480,30 @@ export default function ReplayPlayer({
       <div className="flex-1 flex overflow-hidden">
         {/* Editor View (Left) */}
         <div className="flex-1 flex flex-col border-r border-gray-200">
-          <div className="px-4 py-2 bg-gray-100 border-b border-gray-200">
+          <div className="px-4 py-2 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3">
             <h2 className="font-semibold text-gray-900">Editor</h2>
+            <label className="flex items-center gap-2 text-xs text-gray-700 select-none cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={showAuthorshipHighlight}
+                onChange={(e) => setShowAuthorshipHighlight(e.target.checked)}
+              />
+              <span>GPT/User Highlight</span>
+            </label>
           </div>
+          {showAuthorshipHighlight && (
+            <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center gap-4 text-[11px] text-gray-700">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-amber-300 border border-amber-400" />
+                GPT generated
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-300 border border-green-400" />
+                User written
+              </span>
+            </div>
+          )}
           <div className="flex-1 overflow-auto p-6 bg-white relative">
             {/* Editor Event Indicator */}
             {currentEvent && (
@@ -1907,11 +2511,14 @@ export default function ReplayPlayer({
                 className={`absolute top-4 right-4 z-10 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium shadow-md ${
                   currentEvent.type === 'paste_external'
                     ? 'bg-red-100 text-red-700 border border-red-200'
+                    : currentEvent.type === 'chat'
+                      ? 'bg-purple-100 text-purple-700 border border-purple-200'
                     : currentEvent.type === 'paste_internal'
                       ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                       : 'bg-blue-100 text-blue-700 border border-blue-200'
                 }`}
               >
+                {currentEvent.type === 'chat' && <MessageSquare className="w-4 h-4" />}
                 {currentEvent.type === 'paste_external' && <AlertTriangle className="w-4 h-4" />}
                 {currentEvent.type === 'paste_internal' && <ClipboardCopy className="w-4 h-4" />}
                 {currentEvent.type === 'submission' && <Send className="w-4 h-4" />}

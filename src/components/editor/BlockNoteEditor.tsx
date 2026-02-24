@@ -52,6 +52,7 @@ const countWords = (document: unknown): number => {
 
 export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
+  const pendingTypingSourceRef = useRef<{ source: 'gpt'; setAt: number } | null>(null);
   const hasLoadedSnapshotRef = useRef(false);
   const initialSnapshotSeededRef = useRef(false);
   const validator = getGlobalValidator();
@@ -60,6 +61,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    pendingTypingSourceRef.current = null;
     hasLoadedSnapshotRef.current = false;
     initialSnapshotSeededRef.current = false;
     setMaxExistingSequence(-1);
@@ -244,6 +246,19 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       const txTimestamp = Date.now();
       const steps = Array.isArray(transaction.steps) ? transaction.steps : [];
       const currentWordCount = countWords(editor.document);
+      const currentDocContentSize = Number.isFinite(transaction?.doc?.content?.size)
+        ? Math.max(0, Math.floor(transaction.doc.content.size))
+        : undefined;
+      const pendingTypingSource = pendingTypingSourceRef.current;
+      const typingSource = (
+        pendingTypingSource &&
+        pendingTypingSource.source === "gpt" &&
+        txTimestamp - pendingTypingSource.setAt <= 2000
+      ) ? "gpt" : "user";
+
+      if (pendingTypingSource && typingSource !== "gpt") {
+        pendingTypingSourceRef.current = null;
+      }
       steps.forEach((step: unknown, stepIndex: number) => {
         try {
           const stepObject = step as { toJSON?: () => unknown };
@@ -263,11 +278,18 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
             stepCount: steps.length,
             transactionTimestamp: txTimestamp,
             wordCount: currentWordCount,
+            docContentSize: currentDocContentSize,
+            source: typingSource,
           });
         } catch {
           // Ignore step serialization failures and continue processing update.
         }
       });
+
+      // Paste-from-chat provenance is attached to the next doc-changing transaction only.
+      if (typingSource === "gpt") {
+        pendingTypingSourceRef.current = null;
+      }
 
       // Track activity (throttled to 1 per second)
       tracker.trackActivity();
@@ -375,6 +397,10 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
           targetArea: "editor",
           matchMethod: classification.matchMethod,
         });
+      }
+
+      if (classification.isInternal && classification.source === "chat") {
+        pendingTypingSourceRef.current = { source: "gpt", setAt: Date.now() };
       }
 
       if (!classification.isInternal) {
