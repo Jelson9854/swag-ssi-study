@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,11 +54,64 @@ interface ViewWrapperProps {
     timestamp: Date;
     sequenceNumber: number;
   }>;
+  events: Array<{
+    id: number;
+    eventType: string;
+    eventData: unknown;
+    timestamp: Date;
+    sequenceNumber: number;
+  }>;
   latestSubmission: {
     eventData: Record<string, unknown>[];
     timestamp: Date;
   } | null;
 }
+
+interface SubmissionWordBreakdown {
+  submissionId: number | null;
+  totalWords: number;
+  userWords: number;
+  gptWords: number;
+}
+
+const extractBlockNoteText = (value: unknown): string => {
+  const parts: string[] = [];
+
+  const walk = (node: unknown, parentKey?: string) => {
+    if (typeof node === 'string') {
+      if (parentKey === 'text' || parentKey === 'content') {
+        parts.push(node);
+      }
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      node.forEach((child) => walk(child, parentKey));
+      return;
+    }
+
+    if (node && typeof node === 'object') {
+      Object.entries(node as Record<string, unknown>).forEach(([key, child]) => {
+        walk(child, key);
+      });
+    }
+  };
+
+  walk(value);
+  return parts.join(' ');
+};
+
+const countWordsFromDocument = (document: unknown): number => {
+  const plainText = extractBlockNoteText(document)
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!plainText) {
+    return 0;
+  }
+
+  return plainText.split(' ').length;
+};
 
 export default function ViewWrapper({
   session,
@@ -66,8 +120,75 @@ export default function ViewWrapper({
   pasteRoutes,
   latestSnapshot,
   submissions,
+  events,
   latestSubmission,
 }: ViewWrapperProps) {
+  const sortedSubmissions = useMemo(
+    () => [...submissions].sort((a, b) => a.sequenceNumber - b.sequenceNumber),
+    [submissions]
+  );
+  const latestSubmissionId = sortedSubmissions.length > 0
+    ? sortedSubmissions[sortedSubmissions.length - 1].id
+    : null;
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState<number | null>(latestSubmissionId);
+  const [selectedSubmissionWordBreakdown, setSelectedSubmissionWordBreakdown] =
+    useState<SubmissionWordBreakdown | null>(null);
+
+  useEffect(() => {
+    setSelectedSubmissionId((current) => {
+      if (current !== null && sortedSubmissions.some((submission) => submission.id === current)) {
+        return current;
+      }
+      return latestSubmissionId;
+    });
+  }, [latestSubmissionId, sortedSubmissions]);
+
+  const selectedSubmission = useMemo(
+    () => (
+      selectedSubmissionId !== null
+        ? sortedSubmissions.find((submission) => submission.id === selectedSubmissionId) ?? null
+        : null
+    ),
+    [selectedSubmissionId, sortedSubmissions]
+  );
+
+  const selectedSubmissionLabel = useMemo(() => {
+    if (!selectedSubmission) {
+      return sortedSubmissions.length > 0 ? 'selected submission' : 'final document';
+    }
+    const index = sortedSubmissions.findIndex((submission) => submission.id === selectedSubmission.id);
+    return index >= 0 ? `Submission ${index + 1}` : 'selected submission';
+  }, [selectedSubmission, sortedSubmissions]);
+
+  const fallbackTotalWords = useMemo(() => {
+    if (selectedSubmission) {
+      return countWordsFromDocument(selectedSubmission.eventData);
+    }
+
+    const fallbackDocument = latestSubmission?.eventData || latestSnapshot?.eventData || [];
+    return countWordsFromDocument(fallbackDocument);
+  }, [selectedSubmission, latestSubmission, latestSnapshot]);
+
+  const displayedWordBreakdown = useMemo<SubmissionWordBreakdown>(() => {
+    if (
+      selectedSubmissionWordBreakdown &&
+      selectedSubmissionWordBreakdown.submissionId === selectedSubmissionId
+    ) {
+      return selectedSubmissionWordBreakdown;
+    }
+
+    return {
+      submissionId: selectedSubmissionId,
+      totalWords: fallbackTotalWords,
+      userWords: fallbackTotalWords,
+      gptWords: 0,
+    };
+  }, [fallbackTotalWords, selectedSubmissionId, selectedSubmissionWordBreakdown]);
+
+  const handleSubmissionWordBreakdownChange = useCallback((next: SubmissionWordBreakdown | null) => {
+    setSelectedSubmissionWordBreakdown(next);
+  }, []);
+
   const sourceAreaLabel = (sourceArea: ViewWrapperProps['pasteRoutes'][number]['sourceArea']) => {
     if (sourceArea === 'instruction') return 'Instruction';
     if (sourceArea === 'external') return 'External';
@@ -139,10 +260,32 @@ export default function ViewWrapper({
               <Type className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{stats.wordCount}</div>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                Total words in final document
-              </p>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {displayedWordBreakdown.userWords}
+                  </div>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">User written</p>
+                </div>
+                <div className="h-8 w-px bg-[hsl(var(--border))]" />
+                <div>
+                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                    {displayedWordBreakdown.gptWords}
+                  </div>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">GPT generated</p>
+                </div>
+              </div>
+              <div className="mt-3 border-t border-[hsl(var(--border))] pt-3 space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[hsl(var(--muted-foreground))]">Total words</span>
+                  <span className="font-medium text-[hsl(var(--foreground))]">
+                    {displayedWordBreakdown.totalWords}
+                  </span>
+                </div>
+                <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  Based on {selectedSubmissionLabel}
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -215,6 +358,10 @@ export default function ViewWrapper({
                 [{ type: 'paragraph', content: [] }]
               }
               submissions={submissions}
+              events={events}
+              selectedSubmissionId={selectedSubmissionId}
+              onSelectSubmissionId={setSelectedSubmissionId}
+              onSubmissionWordBreakdownChange={handleSubmissionWordBreakdownChange}
             />
           </CardContent>
         </Card>

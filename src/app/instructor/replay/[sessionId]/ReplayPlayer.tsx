@@ -221,6 +221,24 @@ const mergeAuthorshipRanges = (ranges: AuthorshipRange[]): AuthorshipRange[] => 
   return merged;
 };
 
+const cloneAuthorshipRanges = (ranges: AuthorshipRange[]): AuthorshipRange[] => {
+  return ranges.map((range) => ({
+    from: range.from,
+    to: range.to,
+    origin: range.origin,
+  }));
+};
+
+const areAuthorshipRangesEqual = (a: AuthorshipRange[], b: AuthorshipRange[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].from !== b[i].from || a[i].to !== b[i].to || a[i].origin !== b[i].origin) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const normalizeAuthorshipRangesForDoc = (
   ranges: AuthorshipRange[],
   maxPosition: number
@@ -822,6 +840,75 @@ export default function ReplayPlayer({
     return origins;
   }, [events]);
 
+  const snapshotAuthorshipSeedById = useMemo(() => {
+    const seeds = new Map<number, AuthorshipRange[]>();
+    if (!tiptapSchema) {
+      return seeds;
+    }
+
+    let ranges: AuthorshipRange[] = [];
+    let currentDocContentSize = 0;
+
+    const sortedEvents = [...events].sort((a, b) => {
+      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      if (a.sequenceNumber !== b.sequenceNumber) return a.sequenceNumber - b.sequenceNumber;
+      return a.id - b.id;
+    });
+
+    sortedEvents.forEach((event) => {
+      if (event.eventType === 'typing_op') {
+        const typingData = (event.eventData || {}) as TypingOpEventData;
+        if (!typingData.stepJson || typeof typingData.stepJson !== 'object') {
+          return;
+        }
+
+        try {
+          const step = Step.fromJSON(tiptapSchema, typingData.stepJson);
+          const stepMap = step.getMap();
+          const loggedDocContentSize = Number(typingData.docContentSize);
+          const hasLoggedDocContentSize = Number.isFinite(loggedDocContentSize) && loggedDocContentSize >= 0;
+          let nextDocContentSize = hasLoggedDocContentSize
+            ? Math.floor(loggedDocContentSize)
+            : null;
+
+          if (nextDocContentSize === null) {
+            let inferredDelta = 0;
+            stepMap.forEach((oldStart, oldEnd, newStart, newEnd) => {
+              inferredDelta += (newEnd - newStart) - (oldEnd - oldStart);
+            });
+
+            const inferredBase = currentDocContentSize > 0 ? currentDocContentSize : 1;
+            nextDocContentSize = Math.max(0, inferredBase + inferredDelta);
+          }
+
+          const origin = typingOriginBySequence.get(event.sequenceNumber) ?? 'user';
+          ranges = applyStepToAuthorshipRanges(
+            ranges,
+            stepMap,
+            origin,
+            Math.max(0, nextDocContentSize)
+          );
+          currentDocContentSize = Math.max(0, nextDocContentSize);
+        } catch {
+          // Ignore malformed historical step logs when building snapshot seeds.
+        }
+        return;
+      }
+
+      if (event.eventType === 'snapshot') {
+        seeds.set(event.id, cloneAuthorshipRanges(ranges));
+        if (currentDocContentSize <= 0) {
+          const snapshotWordCount = Math.max(0, countWordsFromDocument(event.eventData));
+          if (snapshotWordCount > 0) {
+            currentDocContentSize = snapshotWordCount;
+          }
+        }
+      }
+    });
+
+    return seeds;
+  }, [events, tiptapSchema, typingOriginBySequence]);
+
   const findNearestSnapshot = useCallback((time: number) => {
     const snapshotIndex = findLastEventIndexAtOrBefore(snapshotEvents, time);
     if (snapshotIndex < 0) {
@@ -1199,10 +1286,11 @@ export default function ReplayPlayer({
       if (shouldResetBase) {
         editor.replaceBlocks(editor.document, editorDocument);
         lastAppliedTypingSeqRef.current = -1;
-        // Preserve existing authorship ranges on forward snapshot transitions
-        // so highlights remain visible over previously written content.
-        if (isRewind && authorshipRangesRef.current.length > 0) {
-          authorshipRangesRef.current = [];
+        const seededRanges = replayBaseSnapshotId !== null
+          ? (snapshotAuthorshipSeedById.get(replayBaseSnapshotId) ?? [])
+          : [];
+        if (!areAuthorshipRangesEqual(authorshipRangesRef.current, seededRanges)) {
+          authorshipRangesRef.current = cloneAuthorshipRanges(seededRanges);
           authorshipVersionRef.current += 1;
         }
       }
@@ -1372,6 +1460,7 @@ export default function ReplayPlayer({
     replayBaseSnapshotId,
     replayEditorSelection,
     showAuthorshipHighlight,
+    snapshotAuthorshipSeedById,
     typingOriginBySequence,
   ]);
 

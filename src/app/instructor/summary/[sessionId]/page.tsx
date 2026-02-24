@@ -168,6 +168,10 @@ export default async function ViewPage({ params }: PageProps) {
       assignment={assignment}
       stats={stats}
       pasteRoutes={pasteRoutes}
+      events={events.map((event) => ({
+        ...event,
+        eventData: event.eventData as unknown,
+      }))}
       latestSnapshot={latestSnapshot ? { ...latestSnapshot, eventData: latestSnapshot.eventData as Record<string, unknown>[] } : null}
       submissions={submissions.map(s => ({ ...s, eventData: s.eventData as Record<string, unknown>[] }))}
       latestSubmission={latestSubmission ? { ...latestSubmission, eventData: latestSubmission.eventData as Record<string, unknown>[] } : null}
