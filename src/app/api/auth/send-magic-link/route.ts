@@ -100,9 +100,31 @@ export async function POST(request: Request) {
         .where(eq(instructors.id, existingUser.id));
     }
 
+    const resolvedFirstName = (firstName?.trim() || existingUser?.firstName || '').trim();
+    const resolvedLastName = (lastName?.trim() || existingUser?.lastName || '').trim();
+    const recipientName = [resolvedFirstName, resolvedLastName].filter(Boolean).join(' ') || email.split('@')[0];
+
     // Build magic link URL
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const magicLink = `${baseUrl}/verify?token=${token}${shareToken ? `&shareToken=${encodeURIComponent(shareToken)}` : ''}`;
+
+    const sendVerificationEmail = async () => {
+      if (role === 'student') {
+        const { sendStudentVerificationEmail } = await import('@/lib/email');
+        await sendStudentVerificationEmail({
+          to: email,
+          magicLink,
+          studentName: recipientName,
+        });
+        return;
+      }
+
+      const { sendMagicLink } = await import('@/lib/email');
+      await sendMagicLink({
+        to: email,
+        magicLink,
+      });
+    };
 
     // In development, log the link; in production, send email
     if (process.env.NODE_ENV === 'development') {
@@ -117,11 +139,7 @@ export async function POST(request: Request) {
       if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
         console.log('📧 Gmail SMTP로 실제 이메일 발송 중...');
         try {
-          const { sendMagicLink: sendVerificationEmail } = await import('@/lib/email');
-          await sendVerificationEmail({
-            to: email,
-            magicLink,
-          });
+          await sendVerificationEmail();
           console.log('✅ 이메일 발송 성공!');
         } catch (error) {
           console.error('❌ 이메일 발송 실패:', error);
@@ -129,11 +147,7 @@ export async function POST(request: Request) {
       }
     } else {
       // Send verification email via Gmail
-      const { sendMagicLink: sendVerificationEmail } = await import('@/lib/email');
-      await sendVerificationEmail({
-        to: email,
-        magicLink,
-      });
+      await sendVerificationEmail();
     }
 
     return NextResponse.json({
