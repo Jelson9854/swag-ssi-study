@@ -5,6 +5,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
+import { StepMap } from "@tiptap/pm/transform";
 import { EventTracker, getSessionEventTracker } from "@/lib/event-tracker";
 import { getGlobalValidator } from "@/lib/copy-validator";
 import { SWAG_CUSTOM_EVENTS } from "@/lib/swag-events";
@@ -50,9 +51,260 @@ const countWords = (document: unknown): number => {
   return plainText.split(" ").length;
 };
 
+type AuthorshipOrigin = "user" | "gpt";
+
+interface AuthorshipRange {
+  from: number;
+  to: number;
+  origin: AuthorshipOrigin;
+}
+
+interface PMDocLike {
+  content: { size: number };
+  textBetween: (from: number, to: number, blockSeparator?: string, leafText?: string) => string;
+}
+
+interface PMStepLike {
+  toJSON?: () => unknown;
+  getMap?: () => StepMap;
+  apply?: (doc: PMDocLike) => { doc?: PMDocLike; failed?: string };
+}
+
+const clampPmPosition = (position: number, maxPosition: number): number => {
+  if (!Number.isFinite(position)) return 0;
+  return Math.min(Math.max(0, Math.floor(position)), maxPosition);
+};
+
+const countWordsFromText = (text: string): number => {
+  const plainText = text.replace(/\s+/g, " ").trim();
+  if (!plainText) {
+    return 0;
+  }
+  return plainText.split(" ").length;
+};
+
+const mergeAuthorshipRanges = (ranges: AuthorshipRange[]): AuthorshipRange[] => {
+  if (ranges.length === 0) return [];
+
+  const normalized = ranges
+    .filter((range) => Number.isFinite(range.from) && Number.isFinite(range.to) && range.to > range.from)
+    .map((range) => ({
+      from: Math.floor(range.from),
+      to: Math.floor(range.to),
+      origin: range.origin,
+    }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+
+  if (normalized.length === 0) return [];
+
+  const merged: AuthorshipRange[] = [normalized[0]];
+  for (let i = 1; i < normalized.length; i += 1) {
+    const current = normalized[i];
+    const last = merged[merged.length - 1];
+    if (current.from <= last.to && current.origin === last.origin) {
+      last.to = Math.max(last.to, current.to);
+      continue;
+    }
+    merged.push(current);
+  }
+
+  return merged;
+};
+
+const removeAuthorshipRange = (
+  ranges: AuthorshipRange[],
+  removeFrom: number,
+  removeTo: number
+): AuthorshipRange[] => {
+  if (removeTo <= removeFrom || ranges.length === 0) return ranges;
+
+  const next: AuthorshipRange[] = [];
+  ranges.forEach((range) => {
+    if (removeTo <= range.from || removeFrom >= range.to) {
+      next.push(range);
+      return;
+    }
+
+    if (range.from < removeFrom) {
+      next.push({
+        from: range.from,
+        to: removeFrom,
+        origin: range.origin,
+      });
+    }
+
+    if (removeTo < range.to) {
+      next.push({
+        from: removeTo,
+        to: range.to,
+        origin: range.origin,
+      });
+    }
+  });
+
+  return mergeAuthorshipRanges(next);
+};
+
+const mapAuthorshipRangesThroughStepMap = (
+  ranges: AuthorshipRange[],
+  stepMap: StepMap,
+  maxPosition: number
+): AuthorshipRange[] => {
+  const mapped: AuthorshipRange[] = [];
+
+  ranges.forEach((range) => {
+    const from = clampPmPosition(stepMap.map(range.from, 1), maxPosition);
+    const to = clampPmPosition(stepMap.map(range.to, -1), maxPosition);
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    if (end > start) {
+      mapped.push({
+        from: start,
+        to: end,
+        origin: range.origin,
+      });
+    }
+  });
+
+  return mergeAuthorshipRanges(mapped);
+};
+
+const applyStepToAuthorshipRanges = (
+  ranges: AuthorshipRange[],
+  stepMap: StepMap,
+  origin: AuthorshipOrigin,
+  maxPosition: number
+): AuthorshipRange[] => {
+  let next = mapAuthorshipRangesThroughStepMap(ranges, stepMap, maxPosition);
+
+  stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+    const from = clampPmPosition(newStart, maxPosition);
+    const to = clampPmPosition(newEnd, maxPosition);
+    if (to <= from) return;
+
+    next = removeAuthorshipRange(next, from, to);
+    next.push({
+      from,
+      to,
+      origin,
+    });
+  });
+
+  return mergeAuthorshipRanges(next);
+};
+
+const getAuthorshipSegmentsInRange = (
+  ranges: AuthorshipRange[],
+  from: number,
+  to: number
+): AuthorshipRange[] => {
+  if (to <= from) return [];
+
+  const normalized = mergeAuthorshipRanges(
+    ranges
+      .map((range) => ({
+        from: Math.max(from, range.from),
+        to: Math.min(to, range.to),
+        origin: range.origin,
+      }))
+      .filter((range) => range.to > range.from)
+  );
+
+  const segments: AuthorshipRange[] = [];
+  let cursor = from;
+
+  normalized.forEach((range) => {
+    const start = Math.max(cursor, range.from);
+    if (start > cursor) {
+      segments.push({
+        from: cursor,
+        to: start,
+        origin: "user",
+      });
+    }
+
+    if (range.to > start) {
+      segments.push({
+        from: start,
+        to: range.to,
+        origin: range.origin,
+      });
+      cursor = range.to;
+    }
+  });
+
+  if (cursor < to) {
+    segments.push({
+      from: cursor,
+      to,
+      origin: "user",
+    });
+  }
+
+  return segments.filter((segment) => segment.to > segment.from);
+};
+
+const isPmDocLike = (value: unknown): value is PMDocLike => {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { content?: { size?: number }; textBetween?: unknown };
+  return (
+    typeof candidate.textBetween === "function" &&
+    !!candidate.content &&
+    typeof candidate.content.size === "number"
+  );
+};
+
+const countAddedWordsFromStepMap = (newDoc: PMDocLike, stepMap: StepMap): number => {
+  const maxPosition = Math.max(0, Math.floor(newDoc.content.size));
+  let addedWords = 0;
+
+  stepMap.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+    const from = clampPmPosition(newStart, maxPosition);
+    const to = clampPmPosition(newEnd, maxPosition);
+    if (to <= from) return;
+    const insertedText = newDoc.textBetween(from, to, " ", " ");
+    addedWords += countWordsFromText(insertedText);
+  });
+
+  return addedWords;
+};
+
+const countDeletedWordsByOriginFromStepMap = (
+  oldDoc: PMDocLike,
+  stepMap: StepMap,
+  ranges: AuthorshipRange[]
+): { user: number; gpt: number } => {
+  const maxPosition = Math.max(0, Math.floor(oldDoc.content.size));
+  let deletedUserWords = 0;
+  let deletedGptWords = 0;
+
+  stepMap.forEach((oldStart, oldEnd) => {
+    const from = clampPmPosition(oldStart, maxPosition);
+    const to = clampPmPosition(oldEnd, maxPosition);
+    if (to <= from) return;
+
+    const segments = getAuthorshipSegmentsInRange(ranges, from, to);
+    segments.forEach((segment) => {
+      const deletedText = oldDoc.textBetween(segment.from, segment.to, " ", " ");
+      const deletedWordCount = countWordsFromText(deletedText);
+      if (segment.origin === "gpt") {
+        deletedGptWords += deletedWordCount;
+      } else {
+        deletedUserWords += deletedWordCount;
+      }
+    });
+  });
+
+  return {
+    user: deletedUserWords,
+    gpt: deletedGptWords,
+  };
+};
+
 export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
   const pendingTypingSourceRef = useRef<{ source: 'gpt'; setAt: number } | null>(null);
+  const authorshipRangesRef = useRef<AuthorshipRange[]>([]);
   const hasLoadedSnapshotRef = useRef(false);
   const initialSnapshotSeededRef = useRef(false);
   const validator = getGlobalValidator();
@@ -62,6 +314,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
   useEffect(() => {
     pendingTypingSourceRef.current = null;
+    authorshipRangesRef.current = [];
     hasLoadedSnapshotRef.current = false;
     initialSnapshotSeededRef.current = false;
     setMaxExistingSequence(-1);
@@ -245,6 +498,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
       const txTimestamp = Date.now();
       const steps = Array.isArray(transaction.steps) ? transaction.steps : [];
+      const stepDocs = Array.isArray(transaction.docs) ? transaction.docs : [];
       const currentWordCount = countWords(editor.document);
       const currentDocContentSize = Number.isFinite(transaction?.doc?.content?.size)
         ? Math.max(0, Math.floor(transaction.doc.content.size))
@@ -259,13 +513,60 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       if (pendingTypingSource && typingSource !== "gpt") {
         pendingTypingSourceRef.current = null;
       }
+      let nextAuthorshipRanges = authorshipRangesRef.current;
       steps.forEach((step: unknown, stepIndex: number) => {
         try {
-          const stepObject = step as { toJSON?: () => unknown };
-          if (typeof stepObject.toJSON !== "function") return;
+          const stepObject = step as PMStepLike;
+          if (typeof stepObject.toJSON !== "function" || typeof stepObject.getMap !== "function") return;
 
           const stepJsonRaw = stepObject.toJSON();
           if (!stepJsonRaw || typeof stepJsonRaw !== "object") return;
+
+          const stepMap = stepObject.getMap();
+          let addedWords = 0;
+          let deletedUserWords = 0;
+          let deletedGptWords = 0;
+          let stepDocContentSize = currentDocContentSize;
+
+          const fallbackOldDoc = stepIndex === 0 ? transaction.before : undefined;
+          const oldDocCandidate = stepDocs[stepIndex] ?? fallbackOldDoc;
+          const oldDoc = isPmDocLike(oldDocCandidate) ? oldDocCandidate : null;
+
+          if (oldDoc && typeof stepObject.apply === "function") {
+            const deletedWords = countDeletedWordsByOriginFromStepMap(
+              oldDoc,
+              stepMap,
+              nextAuthorshipRanges
+            );
+            deletedUserWords = deletedWords.user;
+            deletedGptWords = deletedWords.gpt;
+
+            const stepResult = stepObject.apply(oldDoc);
+            if (stepResult?.doc && isPmDocLike(stepResult.doc)) {
+              addedWords = countAddedWordsFromStepMap(stepResult.doc, stepMap);
+              stepDocContentSize = Math.max(0, Math.floor(stepResult.doc.content.size));
+              nextAuthorshipRanges = applyStepToAuthorshipRanges(
+                nextAuthorshipRanges,
+                stepMap,
+                typingSource,
+                stepResult.doc.content.size
+              );
+            } else if (typeof currentDocContentSize === "number") {
+              nextAuthorshipRanges = applyStepToAuthorshipRanges(
+                nextAuthorshipRanges,
+                stepMap,
+                typingSource,
+                currentDocContentSize
+              );
+            }
+          } else if (typeof currentDocContentSize === "number") {
+            nextAuthorshipRanges = applyStepToAuthorshipRanges(
+              nextAuthorshipRanges,
+              stepMap,
+              typingSource,
+              currentDocContentSize
+            );
+          }
 
           const stepJson = stepJsonRaw as Record<string, unknown>;
           const stepType =
@@ -278,13 +579,17 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
             stepCount: steps.length,
             transactionTimestamp: txTimestamp,
             wordCount: currentWordCount,
-            docContentSize: currentDocContentSize,
+            docContentSize: stepDocContentSize,
+            addedWords,
+            deletedUserWords,
+            deletedGptWords,
             source: typingSource,
           });
         } catch {
           // Ignore step serialization failures and continue processing update.
         }
       });
+      authorshipRangesRef.current = nextAuthorshipRanges;
 
       // Paste-from-chat provenance is attached to the next doc-changing transaction only.
       if (typingSource === "gpt") {

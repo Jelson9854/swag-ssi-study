@@ -47,6 +47,10 @@ interface ViewWrapperProps {
     targetArea: 'editor' | 'chat';
     count: number;
   }>;
+  recentUserInput: {
+    content: string;
+    timestamp: Date;
+  } | null;
   latestSnapshot: { eventData: Record<string, unknown>[] } | null;
   submissions: Array<{
     id: number;
@@ -72,6 +76,17 @@ interface SubmissionWordBreakdown {
   totalWords: number;
   userWords: number;
   gptWords: number;
+}
+
+interface SubmissionContributionMetrics {
+  submissionId: number | null;
+  ha: number;
+  hd: number;
+  gp: number;
+  gd: number;
+  hcr: number | null;
+  her: number | null;
+  isExact: boolean;
 }
 
 const extractBlockNoteText = (value: unknown): string => {
@@ -113,11 +128,29 @@ const countWordsFromDocument = (document: unknown): number => {
   return plainText.split(' ').length;
 };
 
+const formatDurationWithHours = (ms: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  return `${minutes}m ${seconds}s`;
+};
+
+const truncateText = (text: string, maxLength: number): string => {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+};
+
 export default function ViewWrapper({
   session,
   assignment,
   stats,
   pasteRoutes,
+  recentUserInput,
   latestSnapshot,
   submissions,
   events,
@@ -133,6 +166,8 @@ export default function ViewWrapper({
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<number | null>(latestSubmissionId);
   const [selectedSubmissionWordBreakdown, setSelectedSubmissionWordBreakdown] =
     useState<SubmissionWordBreakdown | null>(null);
+  const [selectedSubmissionContributionMetrics, setSelectedSubmissionContributionMetrics] =
+    useState<SubmissionContributionMetrics | null>(null);
 
   useEffect(() => {
     setSelectedSubmissionId((current) => {
@@ -151,14 +186,6 @@ export default function ViewWrapper({
     ),
     [selectedSubmissionId, sortedSubmissions]
   );
-
-  const selectedSubmissionLabel = useMemo(() => {
-    if (!selectedSubmission) {
-      return sortedSubmissions.length > 0 ? 'selected submission' : 'final document';
-    }
-    const index = sortedSubmissions.findIndex((submission) => submission.id === selectedSubmission.id);
-    return index >= 0 ? `Submission ${index + 1}` : 'selected submission';
-  }, [selectedSubmission, sortedSubmissions]);
 
   const fallbackTotalWords = useMemo(() => {
     if (selectedSubmission) {
@@ -189,6 +216,30 @@ export default function ViewWrapper({
     setSelectedSubmissionWordBreakdown(next);
   }, []);
 
+  const handleSubmissionContributionMetricsChange = useCallback((next: SubmissionContributionMetrics | null) => {
+    setSelectedSubmissionContributionMetrics(next);
+  }, []);
+
+  const displayedContributionMetrics = useMemo(() => {
+    if (
+      selectedSubmissionContributionMetrics &&
+      selectedSubmissionContributionMetrics.submissionId === selectedSubmissionId
+    ) {
+      return selectedSubmissionContributionMetrics;
+    }
+
+    return {
+      submissionId: selectedSubmissionId,
+      ha: 0,
+      hd: 0,
+      gp: 0,
+      gd: 0,
+      hcr: null,
+      her: null,
+      isExact: false,
+    };
+  }, [selectedSubmissionContributionMetrics, selectedSubmissionId]);
+
   const sourceAreaLabel = (sourceArea: ViewWrapperProps['pasteRoutes'][number]['sourceArea']) => {
     if (sourceArea === 'instruction') return 'Instruction';
     if (sourceArea === 'external') return 'External';
@@ -200,6 +251,36 @@ export default function ViewWrapper({
   const targetAreaLabel = (targetArea: ViewWrapperProps['pasteRoutes'][number]['targetArea']) => {
     return targetArea === 'chat' ? 'Chat' : 'Editor';
   };
+
+  const selectedSubmissionElapsedMs = useMemo(() => {
+    const startedAtMs = new Date(session.startedAt).getTime();
+    const endAtMs = selectedSubmission
+      ? new Date(selectedSubmission.timestamp).getTime()
+      : latestSubmission
+        ? new Date(latestSubmission.timestamp).getTime()
+        : null;
+
+    if (!Number.isFinite(startedAtMs) || endAtMs === null || !Number.isFinite(endAtMs)) {
+      return null;
+    }
+
+    return Math.max(0, endAtMs - startedAtMs);
+  }, [latestSubmission, selectedSubmission, session.startedAt]);
+
+  const recentUserInputPreview = useMemo(() => {
+    if (!recentUserInput) return null;
+    const normalized = recentUserInput.content.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return {
+        text: '(empty message)',
+        timestamp: new Date(recentUserInput.timestamp).toLocaleString(),
+      };
+    }
+    return {
+      text: truncateText(normalized, 80),
+      timestamp: new Date(recentUserInput.timestamp).toLocaleString(),
+    };
+  }, [recentUserInput]);
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -250,6 +331,11 @@ export default function ViewWrapper({
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
                 Typing activity only
               </p>
+              {selectedSubmissionElapsedMs !== null && (
+                <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))] border-t border-[hsl(var(--border))] pt-2">
+                  Total elapsed (incl. idle): {formatDurationWithHours(selectedSubmissionElapsedMs)}
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -282,9 +368,27 @@ export default function ViewWrapper({
                     {displayedWordBreakdown.totalWords}
                   </span>
                 </div>
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Based on {selectedSubmissionLabel}
-                </p>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[hsl(var(--muted-foreground))]">HCR</span>
+                  <span className="font-medium text-[hsl(var(--foreground))]">
+                    {displayedContributionMetrics.hcr === null
+                      ? 'N/A'
+                      : `${(displayedContributionMetrics.hcr * 100).toFixed(1)}%`}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-[hsl(var(--muted-foreground))]">HER</span>
+                  <span className="font-medium text-[hsl(var(--foreground))]">
+                    {displayedContributionMetrics.her === null
+                      ? 'N/A'
+                      : `${(displayedContributionMetrics.her * 100).toFixed(1)}%`}
+                  </span>
+                </div>
+                {!displayedContributionMetrics.isExact && (
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Exact edit logs unavailable
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -300,6 +404,16 @@ export default function ViewWrapper({
               <p className="text-xs text-[hsl(var(--muted-foreground))]">
                 {stats.totalChatMessages} messages in {stats.totalConversations} {stats.totalConversations === 1 ? 'conversation' : 'conversations'}
               </p>
+              {recentUserInputPreview && (
+                <div className="mt-2 border-t border-[hsl(var(--border))] pt-2">
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Recent user input ({recentUserInputPreview.timestamp})
+                  </p>
+                  <p className="text-xs text-[hsl(var(--foreground))] mt-1 break-words">
+                    {recentUserInputPreview.text}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -362,6 +476,7 @@ export default function ViewWrapper({
               selectedSubmissionId={selectedSubmissionId}
               onSelectSubmissionId={setSelectedSubmissionId}
               onSubmissionWordBreakdownChange={handleSubmissionWordBreakdownChange}
+              onSubmissionContributionMetricsChange={handleSubmissionContributionMetricsChange}
             />
           </CardContent>
         </Card>

@@ -36,6 +36,9 @@ export interface TypingOpContext {
   transactionTimestamp?: number;
   wordCount?: number;
   docContentSize?: number;
+  addedWords?: number;
+  deletedUserWords?: number;
+  deletedGptWords?: number;
   source?: 'user' | 'gpt';
 }
 
@@ -224,6 +227,9 @@ export class EventTracker {
     if (typeof context.transactionTimestamp === 'number') data.transactionTimestamp = context.transactionTimestamp;
     if (typeof context.wordCount === 'number') data.wordCount = context.wordCount;
     if (typeof context.docContentSize === 'number') data.docContentSize = context.docContentSize;
+    if (typeof context.addedWords === 'number') data.addedWords = context.addedWords;
+    if (typeof context.deletedUserWords === 'number') data.deletedUserWords = context.deletedUserWords;
+    if (typeof context.deletedGptWords === 'number') data.deletedGptWords = context.deletedGptWords;
     if (context.source === 'user' || context.source === 'gpt') data.source = context.source;
 
     this.queue.push({

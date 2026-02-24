@@ -29,10 +29,24 @@ interface SubmissionWordBreakdown {
   gptWords: number;
 }
 
+interface SubmissionContributionMetrics {
+  submissionId: number | null;
+  ha: number;
+  hd: number;
+  gp: number;
+  gd: number;
+  hcr: number | null;
+  her: number | null;
+  isExact: boolean;
+}
+
 interface TypingOpEventData {
   stepJson?: Record<string, unknown>;
   source?: 'user' | 'gpt';
   docContentSize?: number;
+  addedWords?: number;
+  deletedUserWords?: number;
+  deletedGptWords?: number;
 }
 
 interface AuthorshipRange {
@@ -49,6 +63,7 @@ interface SummaryAuthorshipOverlayState {
 interface SubmissionAuthorshipAnalysis {
   wordBreakdownById: Map<number, SubmissionWordBreakdown>;
   rangesBySubmissionId: Map<number, AuthorshipRange[]>;
+  contributionById: Map<number, SubmissionContributionMetrics>;
 }
 
 interface ViewClientProps {
@@ -63,6 +78,7 @@ interface ViewClientProps {
   selectedSubmissionId: number | null;
   onSelectSubmissionId: (submissionId: number | null) => void;
   onSubmissionWordBreakdownChange?: (wordBreakdown: SubmissionWordBreakdown | null) => void;
+  onSubmissionContributionMetricsChange?: (metrics: SubmissionContributionMetrics | null) => void;
 }
 
 const clampPmPosition = (position: number, maxPosition: number): number => {
@@ -367,6 +383,7 @@ export default function ViewClient({
   selectedSubmissionId,
   onSelectSubmissionId,
   onSubmissionWordBreakdownChange,
+  onSubmissionContributionMetricsChange,
 }: ViewClientProps) {
   const sortedSubmissions = useMemo(
     () => [...submissions].sort((a, b) => a.sequenceNumber - b.sequenceNumber),
@@ -376,6 +393,7 @@ export default function ViewClient({
   const selectedSubmission = sortedSubmissions.find((submission) => submission.id === selectedSubmissionId) || null;
   const documentToShow = selectedSubmission?.eventData || finalDocument;
   const lastReportedWordBreakdownKeyRef = useRef<string>('');
+  const lastReportedContributionKeyRef = useRef<string>('');
   const authorshipPluginRegisteredRef = useRef(false);
   const lastAppliedOverlayKeyRef = useRef('init');
   const [showAuthorshipHighlight, setShowAuthorshipHighlight] = useState(false);
@@ -479,6 +497,7 @@ export default function ViewClient({
   const submissionAuthorshipAnalysis = useMemo<SubmissionAuthorshipAnalysis>(() => {
     const breakdownById = new Map<number, SubmissionWordBreakdown>();
     const rangesBySubmissionId = new Map<number, AuthorshipRange[]>();
+    const contributionById = new Map<number, SubmissionContributionMetrics>();
     const sortedEvents = [...events].sort((a, b) => {
       const aTime = toTimestampMs(a.timestamp);
       const bTime = toTimestampMs(b.timestamp);
@@ -491,42 +510,72 @@ export default function ViewClient({
     const tiptapSchema = ((editor as any)?._tiptapEditor?.state?.schema ?? null) as Parameters<typeof Step.fromJSON>[0] | null;
     let authorshipRanges: AuthorshipRange[] = [];
     let currentDocContentSize = 0;
+    let ha = 0;
+    let hd = 0;
+    let gp = 0;
+    let gd = 0;
+    let hasExactContributionData = true;
 
     sortedEvents.forEach((event) => {
-      if (event.eventType === 'typing_op' && tiptapSchema) {
+      if (event.eventType === 'typing_op') {
         const eventData = (event.eventData || {}) as TypingOpEventData;
-        if (!eventData.stepJson || typeof eventData.stepJson !== 'object') {
-          return;
+        const origin = typingOriginBySequence.get(event.sequenceNumber) ?? 'user';
+        const addedWordsRaw = Number(eventData.addedWords);
+        const deletedUserWordsRaw = Number(eventData.deletedUserWords);
+        const deletedGptWordsRaw = Number(eventData.deletedGptWords);
+        const hasExactStepContribution =
+          Number.isFinite(addedWordsRaw) &&
+          addedWordsRaw >= 0 &&
+          Number.isFinite(deletedUserWordsRaw) &&
+          deletedUserWordsRaw >= 0 &&
+          Number.isFinite(deletedGptWordsRaw) &&
+          deletedGptWordsRaw >= 0;
+
+        if (hasExactStepContribution) {
+          const addedWords = Math.max(0, Math.floor(addedWordsRaw));
+          const deletedUserWords = Math.max(0, Math.floor(deletedUserWordsRaw));
+          const deletedGptWords = Math.max(0, Math.floor(deletedGptWordsRaw));
+
+          if (origin === 'gpt') {
+            gp += addedWords;
+          } else {
+            ha += addedWords;
+          }
+          hd += deletedUserWords;
+          gd += deletedGptWords;
+        } else {
+          hasExactContributionData = false;
         }
 
-        try {
-          const step = Step.fromJSON(tiptapSchema, eventData.stepJson);
-          const stepMap = step.getMap();
-          const origin = typingOriginBySequence.get(event.sequenceNumber) ?? 'user';
+        if (tiptapSchema && eventData.stepJson && typeof eventData.stepJson === 'object') {
+          try {
+            const step = Step.fromJSON(tiptapSchema, eventData.stepJson);
+            const stepMap = step.getMap();
 
-          const loggedDocContentSize = Number(eventData.docContentSize);
-          const hasLoggedDocContentSize = Number.isFinite(loggedDocContentSize) && loggedDocContentSize >= 0;
-          let nextDocContentSize = hasLoggedDocContentSize ? Math.floor(loggedDocContentSize) : null;
+            const loggedDocContentSize = Number(eventData.docContentSize);
+            const hasLoggedDocContentSize = Number.isFinite(loggedDocContentSize) && loggedDocContentSize >= 0;
+            let nextDocContentSize = hasLoggedDocContentSize ? Math.floor(loggedDocContentSize) : null;
 
-          if (nextDocContentSize === null) {
-            let inferredDelta = 0;
-            stepMap.forEach((oldStart, oldEnd, newStart, newEnd) => {
-              inferredDelta += (newEnd - newStart) - (oldEnd - oldStart);
-            });
+            if (nextDocContentSize === null) {
+              let inferredDelta = 0;
+              stepMap.forEach((oldStart, oldEnd, newStart, newEnd) => {
+                inferredDelta += (newEnd - newStart) - (oldEnd - oldStart);
+              });
 
-            const inferredBase = currentDocContentSize > 0 ? currentDocContentSize : 1;
-            nextDocContentSize = Math.max(0, inferredBase + inferredDelta);
+              const inferredBase = currentDocContentSize > 0 ? currentDocContentSize : 1;
+              nextDocContentSize = Math.max(0, inferredBase + inferredDelta);
+            }
+
+            authorshipRanges = applyStepToAuthorshipRanges(
+              authorshipRanges,
+              stepMap,
+              origin,
+              Math.max(0, nextDocContentSize)
+            );
+            currentDocContentSize = Math.max(0, nextDocContentSize);
+          } catch {
+            // Ignore malformed historical steps.
           }
-
-          authorshipRanges = applyStepToAuthorshipRanges(
-            authorshipRanges,
-            stepMap,
-            origin,
-            Math.max(0, nextDocContentSize)
-          );
-          currentDocContentSize = Math.max(0, nextDocContentSize);
-        } catch {
-          // Ignore malformed historical steps.
         }
       }
 
@@ -543,6 +592,21 @@ export default function ViewClient({
           gptWords,
         });
         rangesBySubmissionId.set(event.id, cloneAuthorshipRanges(authorshipRanges));
+
+        const netHuman = ha - hd;
+        const netGpt = gp - gd;
+        const hcrDenominator = netHuman + netGpt;
+        const herDenominator = ha + hd + gp + gd;
+        contributionById.set(event.id, {
+          submissionId: event.id,
+          ha,
+          hd,
+          gp,
+          gd,
+          hcr: hasExactContributionData && hcrDenominator > 0 ? netHuman / hcrDenominator : null,
+          her: hasExactContributionData && herDenominator > 0 ? (ha + hd + gd) / herDenominator : null,
+          isExact: hasExactContributionData,
+        });
       }
     });
 
@@ -559,11 +623,22 @@ export default function ViewClient({
         gptWords: 0,
       });
       rangesBySubmissionId.set(submission.id, []);
+      contributionById.set(submission.id, {
+        submissionId: submission.id,
+        ha: 0,
+        hd: 0,
+        gp: 0,
+        gd: 0,
+        hcr: null,
+        her: null,
+        isExact: false,
+      });
     });
 
     return {
       wordBreakdownById: breakdownById,
       rangesBySubmissionId,
+      contributionById,
     };
   }, [editor, events, sortedSubmissions, typingOriginBySequence]);
 
@@ -605,6 +680,52 @@ export default function ViewClient({
     documentToShow,
     onSubmissionWordBreakdownChange,
     selectedSubmission,
+    selectedSubmissionId,
+    submissionAuthorshipAnalysis,
+  ]);
+
+  useEffect(() => {
+    if (!onSubmissionContributionMetricsChange) return;
+
+    let nextMetrics: SubmissionContributionMetrics | null = null;
+    if (selectedSubmissionId !== null) {
+      nextMetrics = submissionAuthorshipAnalysis.contributionById.get(selectedSubmissionId) ?? null;
+      if (!nextMetrics) {
+        nextMetrics = {
+          submissionId: selectedSubmissionId,
+          ha: 0,
+          hd: 0,
+          gp: 0,
+          gd: 0,
+          hcr: null,
+          her: null,
+          isExact: false,
+        };
+      }
+    } else {
+      nextMetrics = {
+        submissionId: null,
+        ha: 0,
+        hd: 0,
+        gp: 0,
+        gd: 0,
+        hcr: null,
+        her: null,
+        isExact: false,
+      };
+    }
+
+    const nextKey = nextMetrics
+      ? `${nextMetrics.submissionId ?? 'none'}:${nextMetrics.ha}:${nextMetrics.hd}:${nextMetrics.gp}:${nextMetrics.gd}:${nextMetrics.hcr ?? 'null'}:${nextMetrics.her ?? 'null'}:${nextMetrics.isExact ? 1 : 0}`
+      : 'null';
+    if (nextKey === lastReportedContributionKeyRef.current) {
+      return;
+    }
+
+    lastReportedContributionKeyRef.current = nextKey;
+    onSubmissionContributionMetricsChange(nextMetrics);
+  }, [
+    onSubmissionContributionMetricsChange,
     selectedSubmissionId,
     submissionAuthorshipAnalysis,
   ]);

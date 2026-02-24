@@ -128,6 +128,7 @@ export default async function ViewPage({ params }: PageProps) {
   const totalChatMessages = flatMessages.length;
   const userMessages = flatMessages.filter(m => m.role === 'user').length;
   const assistantMessages = flatMessages.filter(m => m.role === 'assistant').length;
+  const latestUserMessage = [...flatMessages].reverse().find((message) => message.role === 'user') || null;
 
   // Calculate active typing time based on snapshot gaps
   const TYPING_GAP_THRESHOLD = 2 * 60 * 1000; // 2 minutes
@@ -168,6 +169,10 @@ export default async function ViewPage({ params }: PageProps) {
       assignment={assignment}
       stats={stats}
       pasteRoutes={pasteRoutes}
+      recentUserInput={latestUserMessage ? {
+        content: latestUserMessage.content,
+        timestamp: latestUserMessage.timestamp,
+      } : null}
       events={events.map((event) => ({
         ...event,
         eventData: event.eventData as unknown,
