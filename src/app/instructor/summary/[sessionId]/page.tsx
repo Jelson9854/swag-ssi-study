@@ -73,7 +73,13 @@ export default async function ViewPage({ params }: PageProps) {
   const latestSubmission = submissions.length > 0 ? submissions[submissions.length - 1] : null;
 
   // Calculate statistics
-  const totalEditorEvents = events.filter(e => e.eventType !== 'typing_op').length;
+  const totalEditorEvents = events.filter(
+    (e) =>
+      e.eventType !== 'typing_op' &&
+      e.eventType !== 'editor_selection' &&
+      e.eventType !== 'chat_input' &&
+      e.eventType !== 'chat_web_search_toggle'
+  ).length;
   const externalPasteAttempts = events.filter(e => e.eventType === 'paste_external').length;
   const internalPastes = events.filter(e => e.eventType === 'paste_internal').length;
 

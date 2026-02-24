@@ -6,7 +6,15 @@ import {
 } from './swag-events';
 
 export interface EditorEventData {
-  type: 'paste_internal' | 'paste_external' | 'snapshot' | 'submission' | 'typing_op';
+  type:
+    | 'paste_internal'
+    | 'paste_external'
+    | 'snapshot'
+    | 'submission'
+    | 'typing_op'
+    | 'editor_selection'
+    | 'chat_input'
+    | 'chat_web_search_toggle';
   timestamp: number;
   sequenceNumber: number;
   data?: unknown;
@@ -29,6 +37,25 @@ export interface TypingOpContext {
   wordCount?: number;
 }
 
+export interface EditorSelectionContext {
+  from: number;
+  to: number;
+}
+
+export interface ChatInputContext {
+  text: string;
+  selectionStart: number;
+  selectionEnd: number;
+  conversationId?: string;
+  webSearchEnabled?: boolean;
+  trigger?: 'input' | 'selection' | 'submit_clear' | 'web_search_toggle';
+}
+
+export interface ChatWebSearchToggleContext {
+  enabled: boolean;
+  conversationId?: string;
+}
+
 export class EventTracker {
   private queue: EditorEventData[] = [];
   private sequenceNumber = 0;
@@ -43,11 +70,17 @@ export class EventTracker {
   private inactivityTimer: NodeJS.Timeout | null = null;
   private keystrokeCount = 0; // 키 입력 카운터
   private lastSnapshotSequenceNumber = -1;
+  private lastEditorSelectionKey = '';
+  private lastEditorSelectionLoggedAt = 0;
+  private lastChatInputKey = '';
+  private lastChatInputLoggedAt = 0;
   private KEYSTROKES_PER_SNAPSHOT = 80; // 80번 입력마다 snapshot
   private INACTIVITY_SNAPSHOT_DELAY_MS = 3000;
   private MIN_SNAPSHOT_INTERVAL_MS = 15000;
   private BATCH_FLUSH_MS = 2000;
   private MAX_BATCH_SIZE = 50;
+  private EDITOR_SELECTION_THROTTLE_MS = 80;
+  private CHAT_INPUT_SELECTION_THROTTLE_MS = 80;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -194,6 +227,97 @@ export class EventTracker {
       timestamp: Date.now(),
       sequenceNumber: this.nextSequenceNumber(),
       data,
+    });
+
+    this.scheduleSave();
+  }
+
+  trackEditorSelection(context: EditorSelectionContext) {
+    const from = Number.isFinite(context.from) ? Math.max(0, Math.floor(context.from)) : 0;
+    const to = Number.isFinite(context.to) ? Math.max(0, Math.floor(context.to)) : from;
+    const key = `${from}:${to}`;
+    const now = Date.now();
+
+    if (key === this.lastEditorSelectionKey) {
+      return;
+    }
+
+    if (now - this.lastEditorSelectionLoggedAt < this.EDITOR_SELECTION_THROTTLE_MS) {
+      return;
+    }
+
+    this.lastEditorSelectionKey = key;
+    this.lastEditorSelectionLoggedAt = now;
+
+    this.queue.push({
+      type: 'editor_selection',
+      timestamp: now,
+      sequenceNumber: this.nextSequenceNumber(),
+      data: {
+        from,
+        to,
+        isCollapsed: from === to,
+      },
+    });
+
+    this.scheduleSave();
+  }
+
+  trackChatInput(context: ChatInputContext) {
+    const text = typeof context.text === 'string' ? context.text : '';
+    const selectionStart = Number.isFinite(context.selectionStart)
+      ? Math.max(0, Math.floor(context.selectionStart))
+      : text.length;
+    const selectionEnd = Number.isFinite(context.selectionEnd)
+      ? Math.max(0, Math.floor(context.selectionEnd))
+      : selectionStart;
+    const conversationId = typeof context.conversationId === 'string' ? context.conversationId : null;
+    const webSearchEnabled = !!context.webSearchEnabled;
+    const trigger = context.trigger ?? 'input';
+    const key = `${conversationId ?? 'none'}:${webSearchEnabled ? 1 : 0}:${selectionStart}:${selectionEnd}:${text}`;
+    const now = Date.now();
+
+    if (key === this.lastChatInputKey) {
+      return;
+    }
+
+    if (
+      trigger === 'selection' &&
+      now - this.lastChatInputLoggedAt < this.CHAT_INPUT_SELECTION_THROTTLE_MS
+    ) {
+      return;
+    }
+
+    this.lastChatInputKey = key;
+    this.lastChatInputLoggedAt = now;
+
+    this.queue.push({
+      type: 'chat_input',
+      timestamp: now,
+      sequenceNumber: this.nextSequenceNumber(),
+      data: {
+        text,
+        selectionStart,
+        selectionEnd,
+        conversationId,
+        webSearchEnabled,
+        trigger,
+      },
+    });
+
+    this.scheduleSave();
+  }
+
+  trackChatWebSearchToggle(context: ChatWebSearchToggleContext) {
+    const now = Date.now();
+    this.queue.push({
+      type: 'chat_web_search_toggle',
+      timestamp: now,
+      sequenceNumber: this.nextSequenceNumber(),
+      data: {
+        enabled: !!context.enabled,
+        conversationId: typeof context.conversationId === 'string' ? context.conversationId : null,
+      },
     });
 
     this.scheduleSave();

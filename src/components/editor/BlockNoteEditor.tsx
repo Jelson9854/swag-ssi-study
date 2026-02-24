@@ -286,10 +286,33 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       }
     };
 
+    // Track cursor / selection movement independently from doc changes.
+    const handleSelectionUpdate = () => {
+      const tracker = trackerRef.current;
+      if (!tracker) return;
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = (tiptapEditor as any).state;
+        const selection = state?.selection;
+        if (!selection) return;
+
+        tracker.trackEditorSelection({
+          from: selection.from,
+          to: selection.to,
+        });
+      } catch {
+        // Ignore selection extraction failures.
+      }
+    };
+
     tiptapEditor.on("update", handleUpdate);
+    tiptapEditor.on("selectionUpdate", handleSelectionUpdate);
+    handleSelectionUpdate();
 
     return () => {
       tiptapEditor.off("update", handleUpdate);
+      tiptapEditor.off("selectionUpdate", handleSelectionUpdate);
     };
   }, [editor]);
 

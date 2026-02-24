@@ -39,6 +39,7 @@ interface ReplayClientProps {
   conversations: Conversation[];
   startTime: number;
   endTime: number;
+  allowWebSearch: boolean;
 }
 
 export default function ReplayClient({
@@ -47,6 +48,7 @@ export default function ReplayClient({
   conversations,
   startTime,
   endTime,
+  allowWebSearch,
 }: ReplayClientProps) {
   return (
     <ReplayPlayer
@@ -55,6 +57,7 @@ export default function ReplayClient({
       conversations={conversations}
       startTime={startTime}
       endTime={endTime}
+      allowWebSearch={allowWebSearch}
     />
   );
 }

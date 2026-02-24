@@ -60,7 +60,7 @@ export const editorEvents = pgTable('editor_events', {
   id: serial('id').primaryKey(),
   sessionId: text('session_id').notNull().references(() => studentSessions.id),
   eventType: text('event_type').notNull(),
-  // 'paste_internal', 'paste_external', 'snapshot', 'submission', 'typing_op'
+  // 'paste_internal', 'paste_external', 'snapshot', 'submission', 'typing_op', 'editor_selection', 'chat_input', 'chat_web_search_toggle'
   eventData: jsonb('event_data').notNull(),
   // For snapshot: BlockNote document JSON array
   // For paste: { content: string }

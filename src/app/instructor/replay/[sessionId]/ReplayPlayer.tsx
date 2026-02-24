@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import { BlockNoteView } from '@blocknote/mantine';
 import { useCreateBlockNote } from '@blocknote/react';
+import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { Step } from '@tiptap/pm/transform';
 import {
   Area,
@@ -65,6 +67,7 @@ interface ReplayPlayerProps {
   conversations: Conversation[];
   startTime: number;
   endTime: number;
+  allowWebSearch: boolean;
 }
 
 const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
@@ -90,8 +93,39 @@ interface TypingOpEventData {
   wordCount?: number;
 }
 
+interface EditorSelectionEventData {
+  from?: number;
+  to?: number;
+}
+
+interface ChatInputEventData {
+  text?: string;
+  selectionStart?: number;
+  selectionEnd?: number;
+  conversationId?: string | null;
+  webSearchEnabled?: boolean;
+}
+
+interface ChatWebSearchToggleEventData {
+  enabled?: boolean;
+  conversationId?: string | null;
+}
+
+interface ReplayChatInputState {
+  text: string;
+  selectionStart: number;
+  selectionEnd: number;
+  webSearchEnabled: boolean;
+  conversationId: string | null;
+}
+
 interface ReplayTypingOpEvent extends EditorEvent {
   replayTimestamp: number;
+}
+
+interface ReplaySelectionOverlayState {
+  from: number;
+  to: number;
 }
 
 const findLastEventIndexAtOrBefore = (items: Array<{ timestamp: number }>, timestamp: number): number => {
@@ -127,6 +161,76 @@ const findLastReplayTypingIndexAtOrBefore = (
   }
 
   return left - 1;
+};
+
+const clampPmPosition = (position: number, maxPosition: number): number => {
+  if (!Number.isFinite(position)) return 0;
+  return Math.min(Math.max(0, Math.floor(position)), maxPosition);
+};
+
+const replaySelectionPluginKey = new PluginKey<ReplaySelectionOverlayState | null>('replaySelectionOverlay');
+
+const createReplaySelectionPlugin = () => {
+  return new Plugin<ReplaySelectionOverlayState | null>({
+    key: replaySelectionPluginKey,
+    state: {
+      init: () => null,
+      apply: (tr, value) => {
+        const meta = tr.getMeta(replaySelectionPluginKey) as
+          | ReplaySelectionOverlayState
+          | null
+          | undefined;
+        if (meta === undefined) {
+          return value;
+        }
+        return meta;
+      },
+    },
+    props: {
+      decorations(state) {
+        const selection = replaySelectionPluginKey.getState(state);
+        if (!selection) {
+          return null;
+        }
+
+        const maxPosition = state.doc.content.size;
+        let from = clampPmPosition(selection.from, maxPosition);
+        let to = clampPmPosition(selection.to, maxPosition);
+        if (from > to) {
+          [from, to] = [to, from];
+        }
+
+        if (from === to) {
+          const caret = Decoration.widget(
+            from,
+            () => {
+              const element = document.createElement('span');
+              element.style.display = 'inline-block';
+              element.style.width = '0';
+              element.style.height = '1.12em';
+              element.style.marginLeft = '-1px';
+              element.style.borderLeft = '2px solid #2563eb';
+              element.style.verticalAlign = 'text-bottom';
+              element.style.pointerEvents = 'none';
+              return element;
+            },
+            {
+              side: 1,
+              key: `replay-caret-${from}`,
+            }
+          );
+
+          return DecorationSet.create(state.doc, [caret]);
+        }
+
+        const rangeDecoration = Decoration.inline(from, to, {
+          style: 'background-color: rgba(37, 99, 235, 0.22); border-radius: 2px;',
+        });
+
+        return DecorationSet.create(state.doc, [rangeDecoration]);
+      },
+    },
+  });
 };
 
 const extractBlockNoteText = (value: unknown): string => {
@@ -250,6 +354,7 @@ export default function ReplayPlayer({
   conversations,
   startTime,
   endTime,
+  allowWebSearch,
 }: ReplayPlayerProps) {
   // UI Store for chat panel
   const {
@@ -282,6 +387,8 @@ export default function ReplayPlayer({
   const prevVisibleReplayPasteHighlightCountRef = useRef<number>(0);
   const lastAppliedTypingSnapshotKeyRef = useRef<string>('init');
   const lastAppliedTypingSeqRef = useRef<number>(-1);
+  const lastAppliedEditorSelectionKeyRef = useRef<string>('none');
+  const replaySelectionPluginRegisteredRef = useRef<boolean>(false);
   const loggedStepFailureSeqsRef = useRef<Set<number>>(new Set());
   const wordCountGradientId = useId();
 
@@ -308,6 +415,26 @@ export default function ReplayPlayer({
       return () => clearTimeout(timer);
     }
   }, [editor]);
+
+  // Register replay-only visual selection plugin once.
+  useEffect(() => {
+    if (!editor || !isEditorReady || replaySelectionPluginRegisteredRef.current) {
+      return;
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tiptapEditor = (editor as any)._tiptapEditor;
+      if (!tiptapEditor || typeof tiptapEditor.registerPlugin !== 'function') {
+        return;
+      }
+
+      tiptapEditor.registerPlugin(createReplaySelectionPlugin());
+      replaySelectionPluginRegisteredRef.current = true;
+    } catch (error) {
+      console.debug('Replay selection plugin registration skipped:', error);
+    }
+  }, [editor, isEditorReady]);
 
   const duration = endTime - startTime;
 
@@ -632,6 +759,76 @@ export default function ReplayPlayer({
     updateVisibleMessages(currentTime);
   }, [currentTime, rebuildContent, updateVisibleMessages, findNearestSnapshot, getTypingOpsInWindow, startTime]);
 
+  const replayEditorSelection = useMemo<EditorSelectionEventData | null>(() => {
+    let latestSelection: EditorSelectionEventData | null = null;
+
+    for (let i = 0; i < events.length; i += 1) {
+      const event = events[i];
+      if (event.timestamp > currentTime) break;
+      if (event.eventType !== 'editor_selection') continue;
+
+      const eventData = (event.eventData || {}) as EditorSelectionEventData;
+      const from = Number(eventData.from);
+      const to = Number(eventData.to);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+
+      latestSelection = {
+        from: Math.floor(from),
+        to: Math.floor(to),
+      };
+    }
+
+    return latestSelection;
+  }, [events, currentTime]);
+
+  const replayChatInputState = useMemo<ReplayChatInputState>(() => {
+    const state: ReplayChatInputState = {
+      text: '',
+      selectionStart: 0,
+      selectionEnd: 0,
+      webSearchEnabled: false,
+      conversationId: null,
+    };
+
+    for (let i = 0; i < events.length; i += 1) {
+      const event = events[i];
+      if (event.timestamp > currentTime) break;
+
+      if (event.eventType === 'chat_input') {
+        const eventData = (event.eventData || {}) as ChatInputEventData;
+        const text = typeof eventData.text === 'string' ? eventData.text : '';
+        const maxIndex = text.length;
+        const selectionStart = Math.min(
+          Math.max(0, Math.floor(Number(eventData.selectionStart ?? text.length))),
+          maxIndex
+        );
+        const selectionEnd = Math.min(
+          Math.max(selectionStart, Math.floor(Number(eventData.selectionEnd ?? selectionStart))),
+          maxIndex
+        );
+
+        state.text = text;
+        state.selectionStart = selectionStart;
+        state.selectionEnd = selectionEnd;
+        state.conversationId =
+          typeof eventData.conversationId === 'string' ? eventData.conversationId : null;
+        if (typeof eventData.webSearchEnabled === 'boolean') {
+          state.webSearchEnabled = eventData.webSearchEnabled;
+        }
+        continue;
+      }
+
+      if (event.eventType === 'chat_web_search_toggle') {
+        const eventData = (event.eventData || {}) as ChatWebSearchToggleEventData;
+        if (typeof eventData.enabled === 'boolean') {
+          state.webSearchEnabled = eventData.enabled;
+        }
+      }
+    }
+
+    return state;
+  }, [events, currentTime]);
+
   // Update editor when document changes
   useEffect(() => {
     if (!editor || !isEditorReady || editorDocument.length === 0) return;
@@ -736,13 +933,63 @@ export default function ReplayPlayer({
         });
       }
 
+      const selectionKey = replayEditorSelection
+        ? `${replayEditorSelection.from ?? 0}:${replayEditorSelection.to ?? 0}`
+        : 'none';
+      if (selectionKey !== lastAppliedEditorSelectionKeyRef.current) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = (tiptapEditor as any).state;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const view = (tiptapEditor as any).view;
+        if (state && view) {
+          const maxPosition = state.doc.content.size;
+          const tr = state.tr;
+
+          if (replayEditorSelection) {
+            let from = clampPmPosition(Number(replayEditorSelection.from), maxPosition);
+            let to = clampPmPosition(Number(replayEditorSelection.to), maxPosition);
+            if (from > to) {
+              [from, to] = [to, from];
+            }
+
+            tr.setMeta(replaySelectionPluginKey, { from, to });
+
+            try {
+              const $from = state.doc.resolve(from);
+              const $to = state.doc.resolve(to);
+              const nextSelection = from === to
+                ? Selection.near($from, 1)
+                : TextSelection.between($from, $to, 1);
+              tr.setSelection(nextSelection);
+            } catch {
+              // Ignore native selection failures and keep decoration-based rendering.
+            }
+          } else {
+            tr.setMeta(replaySelectionPluginKey, null);
+          }
+
+          const hasReplaySelectionMeta = tr.getMeta(replaySelectionPluginKey) !== undefined;
+          if (tr.selectionSet || hasReplaySelectionMeta) {
+            view.dispatch(tr);
+          }
+        }
+        lastAppliedEditorSelectionKeyRef.current = selectionKey;
+      }
+
       lastAppliedTypingSnapshotKeyRef.current = snapshotKey;
       lastAppliedTypingSeqRef.current = latestTypingSeq;
     } catch (error) {
       // Silently ignore editor update errors during replay
       console.debug('Editor update skipped:', error);
     }
-  }, [editor, isEditorReady, editorDocument, replayTypingOps, replayBaseSnapshotId]);
+  }, [
+    editor,
+    isEditorReady,
+    editorDocument,
+    replayTypingOps,
+    replayBaseSnapshotId,
+    replayEditorSelection,
+  ]);
 
   const seekToPercentage = useCallback((percentage: number) => {
     if (compressedDuration <= 0) return;
@@ -1000,13 +1247,28 @@ export default function ReplayPlayer({
         };
       }
 
-      if (event.eventType === 'typing_op') {
-        const typingData = (event.eventData || {}) as TypingOpEventData;
-        const stepTypeLabel = typeof typingData.stepType === 'string' ? typingData.stepType : null;
+      if (event.eventType === 'editor_selection') {
+        const selectionData = (event.eventData || {}) as EditorSelectionEventData;
+        const from = Number(selectionData.from);
+        const to = Number(selectionData.to);
+        const detail = Number.isFinite(from) && Number.isFinite(to)
+          ? (from === to ? `Cursor ${Math.floor(from)}` : `Selection ${Math.floor(from)}-${Math.floor(to)}`)
+          : null;
+
         return {
-          type: 'typing_op',
-          label: 'Typing Step',
-          detail: stepTypeLabel,
+          type: 'editor_selection',
+          label: 'Cursor / Selection',
+          detail,
+          timestamp: event.timestamp,
+        };
+      }
+
+      if (event.eventType === 'chat_web_search_toggle') {
+        const toggleData = (event.eventData || {}) as ChatWebSearchToggleEventData;
+        return {
+          type: 'chat_web_search_toggle',
+          label: 'Web Search',
+          detail: toggleData.enabled ? 'Enabled' : 'Disabled',
           timestamp: event.timestamp,
         };
       }
@@ -1647,14 +1909,11 @@ export default function ReplayPlayer({
                     ? 'bg-red-100 text-red-700 border border-red-200'
                     : currentEvent.type === 'paste_internal'
                       ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                      : currentEvent.type === 'typing_op'
-                        ? 'bg-slate-100 text-slate-700 border border-slate-200'
                       : 'bg-blue-100 text-blue-700 border border-blue-200'
                 }`}
               >
                 {currentEvent.type === 'paste_external' && <AlertTriangle className="w-4 h-4" />}
                 {currentEvent.type === 'paste_internal' && <ClipboardCopy className="w-4 h-4" />}
-                {currentEvent.type === 'typing_op' && <Keyboard className="w-4 h-4" />}
                 {currentEvent.type === 'submission' && <Send className="w-4 h-4" />}
                 <div className="flex flex-col leading-tight">
                   <span>{currentEvent.label}</span>
@@ -1689,8 +1948,10 @@ export default function ReplayPlayer({
               mode="replay"
               isOpen={isChatOpen}
               onToggle={setChatOpen}
+              allowWebSearch={allowWebSearch}
               replayConversations={replayConversationsForPanel}
               replayMessages={replayMessagesForPanel}
+              replayInputState={replayChatInputState}
               highlightedMessageId={highlightedMessageId}
               replayPasteHighlights={visibleReplayPasteHighlights}
               onReplayPasteClick={handleReplayPasteClick}

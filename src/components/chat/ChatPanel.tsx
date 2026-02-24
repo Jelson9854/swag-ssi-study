@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
 import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
@@ -25,6 +25,13 @@ interface ChatPanelProps {
   highlightedMessageId?: number | null;
   replayPasteHighlights?: ReplayPasteHighlight[];
   onReplayPasteClick?: (timestamp: number) => void;
+  replayInputState?: {
+    text: string;
+    selectionStart: number;
+    selectionEnd: number;
+    webSearchEnabled: boolean;
+    conversationId: string | null;
+  } | null;
 }
 
 function ChatPanel({
@@ -41,10 +48,15 @@ function ChatPanel({
   highlightedMessageId = null,
   replayPasteHighlights = [],
   onReplayPasteClick,
+  replayInputState = null,
 }: ChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const validator = getGlobalValidator();
   const [replayActiveConversationId, setReplayActiveConversationId] = useState<'all' | string>('all');
+  const tracker = useMemo(
+    () => (sessionId ? getSessionEventTracker(sessionId) : null),
+    [sessionId]
+  );
 
   // Zustand store
   const {
@@ -150,6 +162,56 @@ function ChatPanel({
   const shownConversations = isReplayMode ? replayConversationsWithDate : conversations;
   const shownActiveConversationId = isReplayMode ? replayActiveConversationId : activeConversationId;
   const shownMessages = isReplayMode ? replayVisibleMessages : messages;
+  const replayInputText = replayInputState?.text ?? '';
+  const replayInputWebSearchEnabled = replayInputState?.webSearchEnabled ?? false;
+
+  const trackChatInputState = useCallback(
+    (
+      nextText: string,
+      element: HTMLTextAreaElement | null,
+      trigger: 'input' | 'selection' | 'submit_clear' | 'web_search_toggle',
+      webSearchEnabledOverride?: boolean
+    ) => {
+      if (isReplayMode || !tracker) return;
+
+      const conversationId =
+        activeConversationId && activeConversationId !== 'all'
+          ? activeConversationId
+          : undefined;
+      const selectionStart =
+        typeof element?.selectionStart === 'number' ? element.selectionStart : nextText.length;
+      const selectionEnd =
+        typeof element?.selectionEnd === 'number' ? element.selectionEnd : selectionStart;
+
+      tracker.trackChatInput({
+        text: nextText,
+        selectionStart,
+        selectionEnd,
+        conversationId,
+        webSearchEnabled: webSearchEnabledOverride ?? webSearchEnabled,
+        trigger,
+      });
+    },
+    [activeConversationId, isReplayMode, tracker, webSearchEnabled]
+  );
+
+  const handleWebSearchToggle = useCallback(() => {
+    const conversationId =
+      activeConversationId && activeConversationId !== 'all'
+        ? activeConversationId
+        : undefined;
+    const nextEnabled = !webSearchEnabled;
+
+    if (!isReplayMode && tracker) {
+      tracker.trackChatWebSearchToggle({
+        enabled: nextEnabled,
+        conversationId,
+      });
+      trackChatInputState(input, inputRef.current, 'web_search_toggle', nextEnabled);
+    }
+
+    toggleWebSearch();
+  }, [activeConversationId, input, isReplayMode, toggleWebSearch, trackChatInputState, tracker, webSearchEnabled]);
 
   // Copy/Paste validation for chat input
   useEffect(() => {
@@ -157,8 +219,6 @@ function ChatPanel({
 
     const inputElement = inputRef.current;
     if (!inputElement) return;
-    const tracker = sessionId ? getSessionEventTracker(sessionId) : null;
-
     const handleCopy = () => {
       const copiedContent = window.getSelection()?.toString();
       if (copiedContent) {
@@ -218,7 +278,43 @@ function ChatPanel({
       inputElement.removeEventListener('copy', handleCopy);
       inputElement.removeEventListener('paste', handlePaste as EventListener);
     };
-  }, [validator, isReplayMode, sessionId]);
+  }, [validator, isReplayMode, tracker]);
+
+  useEffect(() => {
+    if (!isReplayMode) return;
+
+    const inputElement = inputRef.current;
+    if (!inputElement) return;
+
+    const text = replayInputState?.text ?? '';
+    const maxIndex = text.length;
+    const selectionStart = Math.min(
+      Math.max(0, Math.floor(replayInputState?.selectionStart ?? 0)),
+      maxIndex
+    );
+    const selectionEnd = Math.min(
+      Math.max(selectionStart, Math.floor(replayInputState?.selectionEnd ?? selectionStart)),
+      maxIndex
+    );
+
+    try {
+      inputElement.setSelectionRange(selectionStart, selectionEnd);
+    } catch {
+      // Ignore selection range update failures in replay.
+    }
+  }, [
+    isReplayMode,
+    replayInputState?.text,
+    replayInputState?.selectionStart,
+    replayInputState?.selectionEnd,
+  ]);
+
+  useEffect(() => {
+    const target = inputRef.current;
+    if (!target) return;
+    target.style.height = 'auto';
+    target.style.height = `${target.scrollHeight}px`;
+  }, [input, replayInputText, isReplayMode]);
 
   // Auto-generate title from first message (only in live mode)
   useEffect(() => {
@@ -238,6 +334,8 @@ function ChatPanel({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading || !activeConversationId || activeConversationId === 'all') return;
+
+    trackChatInputState('', null, 'submit_clear');
 
     await sendMessage({
       conversationId: activeConversationId,
@@ -380,18 +478,33 @@ function ChatPanel({
           onReplayPasteClick={isReplayMode ? onReplayPasteClick : undefined}
         />
 
-        {/* Input - only show in live mode */}
-        {!isReplayMode && (
-          <div className="p-4 bg-[hsl(var(--muted))]/10 border-t border-[hsl(var(--border))]">
-            <form onSubmit={handleSubmit}>
+        {/* Input */}
+        <div className="p-4 bg-[hsl(var(--muted))]/10 border-t border-[hsl(var(--border))]">
+          <form onSubmit={isReplayMode ? (e) => e.preventDefault() : handleSubmit}>
               {/* ChatGPT-style input container */}
               <div className="bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-2xl p-3 flex flex-col gap-2 shadow-sm focus-within:ring-2 focus-within:ring-[hsl(var(--primary))]/20 transition-all">
                 {/* Textarea */}
                 <textarea
                   ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  value={isReplayMode ? replayInputText : input}
+                  onChange={
+                    isReplayMode
+                      ? undefined
+                      : (e) => {
+                          const nextValue = e.target.value;
+                          setInput(nextValue);
+                          trackChatInputState(nextValue, e.currentTarget, 'input');
+                        }
+                  }
+                  onSelect={
+                    isReplayMode
+                      ? undefined
+                      : (e) => {
+                          trackChatInputState(e.currentTarget.value, e.currentTarget, 'selection');
+                        }
+                  }
                   onKeyDown={(e) => {
+                    if (isReplayMode) return;
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       if (input.trim() && activeConversationId && !isLoading) {
@@ -400,18 +513,14 @@ function ChatPanel({
                     }
                   }}
                   placeholder="Ask for help with your essay..."
-                  disabled={!activeConversationId || isLoading}
+                  readOnly={isReplayMode}
+                  disabled={!isReplayMode && (!activeConversationId || isLoading)}
                   rows={1}
                   className="w-full bg-transparent resize-none outline-none text-base text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] disabled:text-[hsl(var(--muted-foreground))]"
                   style={{
                     minHeight: '28px',
                     maxHeight: '200px',
                     height: 'auto',
-                  }}
-                  onInput={(e) => {
-                    const target = e.target as HTMLTextAreaElement;
-                    target.style.height = 'auto';
-                    target.style.height = target.scrollHeight + 'px';
                   }}
                 />
 
@@ -421,10 +530,13 @@ function ChatPanel({
                   {allowWebSearch ? (
                     <Button
                       type="button"
-                      onClick={toggleWebSearch}
+                      onClick={isReplayMode ? undefined : handleWebSearchToggle}
+                      disabled={isReplayMode}
                       variant="ghost"
                       size="sm"
-                      className={`flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${webSearchEnabled
+                      className={`flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${(
+                        isReplayMode ? replayInputWebSearchEnabled : webSearchEnabled
+                      )
                         ? 'text-sky-500 bg-sky-500/10 hover:bg-sky-500/20'
                         : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'
                         }`}
@@ -439,11 +551,17 @@ function ChatPanel({
                   {/* Send Button - Circular */}
                   <button
                     type="submit"
-                    disabled={!input.trim() || isLoading || !activeConversationId}
-                    className={`p-2 rounded-full transition-colors flex items-center justify-center ${input.trim() && activeConversationId && !isLoading
+                    disabled={
+                      isReplayMode ||
+                      !input.trim() ||
+                      isLoading ||
+                      !activeConversationId
+                    }
+                    className={`p-2 rounded-full transition-colors flex items-center justify-center ${
+                      !isReplayMode && input.trim() && activeConversationId && !isLoading
                       ? 'bg-[hsl(var(--foreground))] hover:bg-[hsl(var(--foreground))]/90 text-[hsl(var(--background))]'
                       : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] cursor-not-allowed'
-                      }`}
+                    }`}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
@@ -451,9 +569,8 @@ function ChatPanel({
                   </button>
                 </div>
               </div>
-            </form>
-          </div>
-        )}
+          </form>
+        </div>
       </div>
     </>
   );

@@ -143,6 +143,7 @@ export default async function ReplayPage({ params }: PageProps) {
         }))}
         startTime={startTime}
         endTime={endTime}
+        allowWebSearch={assignment.allowWebSearch ?? false}
       />
     </div>
   );
