@@ -115,6 +115,10 @@ h6 {
   content: "Start writing your essay here...";
 }
 
+.blocknote-toolbar-shell .bn-toolbar {
+  max-width: 100%;
+}
+
 /* Recharts focus outline fix (matches replayGPTWritingSystem behavior) */
 .recharts-wrapper:focus,
 .recharts-wrapper svg:focus,

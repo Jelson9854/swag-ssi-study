@@ -1,7 +1,11 @@
 "use client";
 
 import "@blocknote/core/fonts/inter.css";
-import { useCreateBlockNote } from "@blocknote/react";
+import {
+  BlockNoteViewEditor,
+  FormattingToolbar,
+  useCreateBlockNote,
+} from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useEffect, useRef, useState } from "react";
@@ -300,6 +304,18 @@ const countDeletedWordsByOriginFromStepMap = (
     gpt: deletedGptWords,
   };
 };
+
+function CenteredFormattingToolbar() {
+  return (
+    <div className="blocknote-toolbar-shell shrink-0 flex justify-center px-4 pt-1 pb-3">
+      <div className="max-w-full overflow-x-auto">
+        <div className="min-w-max">
+          <FormattingToolbar />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
@@ -749,12 +765,20 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
   }
 
   return (
-    <div className="blocknote-wrapper">
+    <div className="blocknote-wrapper h-full min-h-0">
       <BlockNoteView
         editor={editor}
         theme="light"
+        className="flex h-full min-h-0 flex-col"
+        formattingToolbar={false}
+        renderEditor={false}
         data-placeholder="Start writing your essay here..."
-      />
+      >
+        <CenteredFormattingToolbar />
+        <div className="flex-1 min-h-0 overflow-auto">
+          <BlockNoteViewEditor />
+        </div>
+      </BlockNoteView>
     </div>
   );
 }

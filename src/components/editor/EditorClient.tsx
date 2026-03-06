@@ -267,8 +267,8 @@ export default function EditorClient({
           )}
 
           {/* Editor */}
-          <div className="flex-1 overflow-auto p-6">
-            <div className="max-w-4xl mx-auto">
+          <div className="flex-1 min-h-0 px-6 pb-6 pt-2">
+            <div className="max-w-4xl mx-auto h-full min-h-0">
               <TrackedEditor sessionId={sessionId} strictPasteBlocking={strictPasteBlocking} />
             </div>
           </div>
