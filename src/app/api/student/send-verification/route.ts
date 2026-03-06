@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     });
 
     // Build magic link URL
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3030';
     const magicLink = `${baseUrl}/student/verify?token=${token}&sessionId=${sessionId}`;
 
     // In development, log the link; in production, send email
@@ -117,4 +117,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

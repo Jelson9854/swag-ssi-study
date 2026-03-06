@@ -18,9 +18,11 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passcode, setPasscode] = useState('');
+  const [showResetForm, setShowResetForm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [signupEmailSentTo, setSignupEmailSentTo] = useState<string | null>(null);
+  const [resetEmailSentTo, setResetEmailSentTo] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,6 +64,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
     setIsLoading(true);
     setMessage(null);
     setSignupEmailSentTo(null);
+    setResetEmailSentTo(null);
 
     try {
       const response = await fetch('/api/auth/send-magic-link', {
@@ -102,6 +105,40 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
     }
   };
 
+  const handlePasswordResetRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setMessage(null);
+    setResetEmailSentTo(null);
+
+    try {
+      const response = await fetch('/api/auth/request-password-reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send password reset link');
+      }
+
+      setResetEmailSentTo(email.trim());
+    } catch (error) {
+      setMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Something went wrong',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const emailPlaceholder = `you@${allowedDomains.split(',')[0]}`;
   const domainText = allowedDomains.split(',').map(d => `@${d}`).join(', ');
 
@@ -123,7 +160,10 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
               size="sm"
               onClick={() => {
                 setMode('login');
+                setShowResetForm(false);
                 setMessage(null);
+                setSignupEmailSentTo(null);
+                setResetEmailSentTo(null);
               }}
               className={mode === 'login' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
             >
@@ -135,7 +175,10 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
               size="sm"
               onClick={() => {
                 setMode('signup');
+                setShowResetForm(false);
                 setMessage(null);
+                setSignupEmailSentTo(null);
+                setResetEmailSentTo(null);
               }}
               className={mode === 'signup' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
             >
@@ -143,7 +186,78 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
             </Button>
           </div>
 
-          {mode === 'login' ? (
+          {mode === 'login' && showResetForm ? (
+            resetEmailSentTo ? (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10 p-4 text-sm">
+                  <p className="font-medium text-green-900 dark:text-green-300">Check your email</p>
+                  <p className="mt-1 text-green-800 dark:text-green-200">
+                    If an account exists for <strong>{resetEmailSentTo}</strong>, we&apos;ve sent a password reset link.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="w-full"
+                  onClick={() => {
+                    setShowResetForm(false);
+                    setMessage(null);
+                    setResetEmailSentTo(null);
+                  }}
+                >
+                  Back to login
+                </Button>
+              </div>
+            ) : (
+              <form onSubmit={handlePasswordResetRequest} className="space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">Reset your password</h2>
+                  <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                    Enter the email address you used for SWAG and we&apos;ll send you a reset link.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="reset-email" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Email
+                  </label>
+                  <Input
+                    id="reset-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={emailPlaceholder}
+                  />
+                </div>
+
+                {message?.type === 'error' && (
+                  <div className="p-3 rounded-md text-sm bg-destructive/10 text-destructive">
+                    {message.text}
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? 'Sending...' : 'Send Reset Link'}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="link"
+                  className="w-full"
+                  onClick={() => {
+                    setShowResetForm(false);
+                    setMessage(null);
+                    setResetEmailSentTo(null);
+                  }}
+                >
+                  Back to login
+                </Button>
+              </form>
+            )
+          ) : mode === 'login' ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="login-email" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
@@ -188,6 +302,22 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Logging in...' : 'Log In'}
               </Button>
+
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-0 py-0 text-sm"
+                  onClick={() => {
+                    setShowResetForm(true);
+                    setMessage(null);
+                    setResetEmailSentTo(null);
+                  }}
+                >
+                  Forgot password?
+                </Button>
+              </div>
             </form>
           ) : signupEmailSentTo ? (
             <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/10 p-4 text-sm">

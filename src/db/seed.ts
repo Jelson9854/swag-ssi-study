@@ -25,7 +25,7 @@ Use the chatbot to help you brainstorm ideas, but make sure your final essay ref
   });
 
   console.log('✅ Test assignment created successfully!');
-  console.log('📝 Access URL: http://localhost:3000/s/test-assignment-123');
+  console.log('📝 Access URL: http://localhost:3030/s/test-assignment-123');
 }
 
 // Run seed

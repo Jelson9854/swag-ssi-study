@@ -14,7 +14,7 @@ export async function POST() {
   if (forwardedHost) {
     baseUrl = `${forwardedProto}://${forwardedHost}`;
   } else {
-    baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3030';
   }
 
   return NextResponse.redirect(new URL('/login', baseUrl));

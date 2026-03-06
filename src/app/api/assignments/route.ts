@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     const forwardedHost = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
     const baseUrl = forwardedHost
       ? `${forwardedProto}://${forwardedHost}`
-      : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+      : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3030');
 
     // Create assignment
     const assignmentId = randomUUID();

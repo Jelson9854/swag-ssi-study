@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/db/db';
 import { authTokens, instructors } from '@/db/schema';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, or } from 'drizzle-orm';
 import { hashPassword, validatePassword } from '@/lib/password';
 
 export async function POST(request: Request) {
@@ -30,7 +30,10 @@ export async function POST(request: Request) {
       where: and(
         eq(authTokens.token, token),
         eq(authTokens.used, false),
-        eq(authTokens.type, 'verification'),
+        or(
+          eq(authTokens.type, 'verification'),
+          eq(authTokens.type, 'password_reset')
+        ),
         gt(authTokens.expiresAt, new Date())
       ),
     });
@@ -81,7 +84,11 @@ export async function POST(request: Request) {
       path: '/',
     });
 
-    return NextResponse.json({ success: true, role: user.role });
+    return NextResponse.json({
+      success: true,
+      role: user.role,
+      mode: authToken.type === 'password_reset' ? 'reset' : 'setup',
+    });
   } catch (error) {
     console.error('Set password error:', error);
     return NextResponse.json(

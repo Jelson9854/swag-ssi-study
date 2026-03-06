@@ -19,6 +19,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showResetForm, setShowResetForm] = useState(false);
   const [currentUser, setCurrentUser] = useState<{
     firstName?: string | null;
     lastName?: string | null;
@@ -29,6 +30,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
+  const [passwordResetSentTo, setPasswordResetSentTo] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -117,6 +119,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     e.preventDefault();
     setError('');
     setIsLoading(true);
+    setPasswordResetSentTo(null);
 
     try {
       const response = await fetch('/api/auth/send-magic-link', {
@@ -145,6 +148,38 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     }
   };
 
+  const handlePasswordResetRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+    setPasswordResetSentTo(null);
+
+    try {
+      const response = await fetch('/api/auth/request-password-reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          shareToken,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send password reset email');
+      }
+
+      setPasswordResetSentTo(email.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send password reset email');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (verificationSent) {
     return (
       <Card className="min-h-[200px] bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
@@ -164,6 +199,42 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
                 Click the link in the email to set your password and access the assignment.
                 The link will expire in 15 minutes.
               </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (passwordResetSentTo) {
+    return (
+      <Card className="min-h-[200px] bg-blue-50/50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+        <CardContent className="!p-6 min-h-[200px] flex items-center">
+          <div className="flex w-full items-start gap-4">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+              <Mail className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-300 mb-2">
+                Check Your Email
+              </h3>
+              <p className="text-blue-800 dark:text-blue-200 mb-3">
+                If an account exists for <strong>{passwordResetSentTo}</strong>, we&apos;ve sent a password reset link.
+              </p>
+              <p className="text-sm text-blue-700 dark:text-blue-300/80 mb-4">
+                Open the link in the email to choose a new password and return to this assignment.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setPasswordResetSentTo(null);
+                  setShowResetForm(false);
+                  setError('');
+                }}
+              >
+                Back to login
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -248,7 +319,9 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
           size="sm"
           onClick={() => {
             setMode('login');
+            setShowResetForm(false);
             setError('');
+            setPasswordResetSentTo(null);
           }}
           className={mode === 'login' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
         >
@@ -260,7 +333,9 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
           size="sm"
           onClick={() => {
             setMode('signup');
+            setShowResetForm(false);
             setError('');
+            setPasswordResetSentTo(null);
           }}
           className={mode === 'signup' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
         >
@@ -268,7 +343,58 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
         </Button>
       </div>
 
-      {mode === 'login' ? (
+      {mode === 'login' && showResetForm ? (
+        <form onSubmit={handlePasswordResetRequest} className="space-y-4">
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">Reset your password</h3>
+            <p className="text-sm text-[hsl(var(--muted-foreground))]">
+              Enter your account email and we&apos;ll send you a link to reset your password.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="reset-email" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+              Email
+            </label>
+            <Input
+              type="email"
+              id="reset-email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+              placeholder="your.email@example.com"
+            />
+          </div>
+
+          {error && (
+            <div className="text-destructive text-sm bg-destructive/10 p-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            disabled={isLoading}
+            className="w-full"
+          >
+            {isLoading ? 'Sending...' : 'Send Reset Link'}
+          </Button>
+
+          <Button
+            type="button"
+            variant="link"
+            className="w-full"
+            onClick={() => {
+              setShowResetForm(false);
+              setError('');
+              setPasswordResetSentTo(null);
+            }}
+          >
+            Back to login
+          </Button>
+        </form>
+      ) : mode === 'login' ? (
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="login-email" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
@@ -311,6 +437,22 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
           >
             {isLoading ? 'Logging in...' : 'Login'}
           </Button>
+
+          <div className="flex justify-center">
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto px-0 py-0 text-sm"
+              onClick={() => {
+                setShowResetForm(true);
+                setError('');
+                setPasswordResetSentTo(null);
+              }}
+            >
+              Forgot password?
+            </Button>
+          </div>
         </form>
       ) : (
         <form onSubmit={handleSignup} className="space-y-4">

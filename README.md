@@ -118,16 +118,16 @@ Using Resend (https://resend.com) for email verification:
 ### Accessing the Application
 
 **Root URL:**
-- `http://localhost:3000/` - Redirects to instructor login
+- `http://localhost:3030/` - Redirects to instructor login
 
 **Instructor Portal:**
-- `http://localhost:3000/instructor/login` - Login/Signup page
-- `http://localhost:3000/instructor/dashboard` - Assignment dashboard
-- `http://localhost:3000/instructor/replay/[sessionId]` - Student session replay
+- `http://localhost:3030/instructor/login` - Login/Signup page
+- `http://localhost:3030/instructor/dashboard` - Assignment dashboard
+- `http://localhost:3030/instructor/replay/[sessionId]` - Student session replay
 
 **Student Portal:**
-- `http://localhost:3000/s/[shareToken]` - Assignment landing page
-- `http://localhost:3000/s/[shareToken]/editor` - Writing editor with AI chat
+- `http://localhost:3030/s/[shareToken]` - Assignment landing page
+- `http://localhost:3030/s/[shareToken]/editor` - Writing editor with AI chat
 
 **First-time instructors:**
 1. Go to `/instructor/login`

@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     const recipientName = [resolvedFirstName, resolvedLastName].filter(Boolean).join(' ') || email.split('@')[0];
 
     // Build magic link URL
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3030';
     const magicLink = `${baseUrl}/verify?token=${token}${shareToken ? `&shareToken=${encodeURIComponent(shareToken)}` : ''}`;
 
     const sendVerificationEmail = async () => {

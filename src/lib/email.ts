@@ -11,6 +11,11 @@ interface SendStudentVerificationParams {
   studentName: string;
 }
 
+interface SendPasswordResetParams {
+  to: string;
+  resetLink: string;
+}
+
 // Gmail SMTP transporter 설정
 const createTransporter = () => {
   return nodemailer.createTransport({
@@ -139,3 +144,60 @@ export async function sendStudentVerificationEmail({ to, magicLink, studentName 
   }
 }
 
+export async function sendPasswordResetEmail({ to, resetLink }: SendPasswordResetParams) {
+  const fromAddress = process.env.EMAIL_FROM || process.env.GMAIL_USER || 'SWAG';
+
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: fromAddress,
+      to,
+      subject: 'Reset Your SWAG Password',
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background-color: #f8f9fa; border-radius: 8px; padding: 30px; margin-bottom: 20px;">
+              <h1 style="color: #1a1a1a; margin: 0 0 20px 0; font-size: 24px;">SWAG Password Reset</h1>
+              <p style="margin: 0 0 20px 0; font-size: 16px;">Click the button below to choose a new password for your account:</p>
+
+              <a href="${resetLink}"
+                 style="display: inline-block; background-color: #2563eb; color: white; text-decoration: none; padding: 12px 30px; border-radius: 6px; font-weight: 600; font-size: 16px;">
+                Reset Password
+              </a>
+
+              <p style="margin: 20px 0 0 0; font-size: 14px; color: #666;">
+                Or copy and paste this link into your browser:<br>
+                <a href="${resetLink}" style="color: #2563eb; word-break: break-all;">${resetLink}</a>
+              </p>
+            </div>
+
+            <div style="font-size: 14px; color: #666;">
+              <p style="margin: 0 0 10px 0;">This link will expire in 15 minutes.</p>
+              <p style="margin: 0;">If you didn't request a password reset, you can safely ignore this email.</p>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+
+            <p style="font-size: 12px; color: #999; margin: 0;">
+              <strong>SWAG</strong> - Student Writing with Accountable Generative AI<br>
+              Virginia Tech
+            </p>
+          </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('Failed to send password reset email via Gmail:', error);
+    throw new Error('Failed to send password reset email');
+  }
+}

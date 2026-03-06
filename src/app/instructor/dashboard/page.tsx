@@ -39,7 +39,7 @@ export default async function DashboardPage() {
   const forwardedHost = requestHeaders.get('x-forwarded-host') ?? requestHeaders.get('host');
   const baseUrl = forwardedHost
     ? `${forwardedProto}://${forwardedHost}`
-    : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+    : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3030');
 
   // Single aggregate query instead of N+1
   const assignmentIds = instructorAssignments.map(a => a.id);

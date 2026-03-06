@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db/db';
 import { authTokens, instructors } from '@/db/schema';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, or } from 'drizzle-orm';
 
 export async function POST(request: Request) {
   try {
@@ -19,7 +19,10 @@ export async function POST(request: Request) {
       where: and(
         eq(authTokens.token, token),
         eq(authTokens.used, false),
-        eq(authTokens.type, 'verification'),
+        or(
+          eq(authTokens.type, 'verification'),
+          eq(authTokens.type, 'password_reset')
+        ),
         gt(authTokens.expiresAt, new Date())
       ),
     });
@@ -46,6 +49,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       email: authToken.email,
       role: user.role,
+      mode: authToken.type === 'password_reset' ? 'reset' : 'setup',
     });
   } catch (error) {
     console.error('Token verification error:', error);
