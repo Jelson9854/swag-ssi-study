@@ -3,7 +3,6 @@
 import "@blocknote/core/fonts/inter.css";
 import {
   BlockNoteViewEditor,
-  FormattingToolbar,
   useCreateBlockNote,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
@@ -13,6 +12,7 @@ import { StepMap } from "@tiptap/pm/transform";
 import { EventTracker, getSessionEventTracker } from "@/lib/event-tracker";
 import { getGlobalValidator } from "@/lib/copy-validator";
 import { SWAG_CUSTOM_EVENTS } from "@/lib/swag-events";
+import CenteredFormattingToolbar from "./CenteredFormattingToolbar";
 import toast from "react-hot-toast";
 
 interface BlockNoteEditorProps {
@@ -304,18 +304,6 @@ const countDeletedWordsByOriginFromStepMap = (
     gpt: deletedGptWords,
   };
 };
-
-function CenteredFormattingToolbar() {
-  return (
-    <div className="blocknote-toolbar-shell shrink-0 flex justify-center px-4 pt-1 pb-3">
-      <div className="max-w-full overflow-x-auto">
-        <div className="min-w-max">
-          <FormattingToolbar />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);

@@ -91,6 +91,7 @@ export default async function EditorPage({ params }: EditorPageProps) {
       assignmentId={assignment.id}
       assignmentTitle={assignment.title}
       assignmentInstructions={assignment.instructions}
+      assignmentCriteria={assignment.criteria}
       deadline={assignment.deadline}
       allowWebSearch={assignment.allowWebSearch ?? false}
       strictPasteBlocking={assignment.strictPasteBlocking ?? false}

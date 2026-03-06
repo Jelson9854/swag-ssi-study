@@ -88,6 +88,10 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
 
   const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
   const isOverdue = new Date(assignment.deadline) < new Date();
+  const normalizedAssignment = {
+    ...assignment,
+    includeInstructionInPrompt: assignment.includeInstructionInPrompt ?? false,
+  };
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -122,7 +126,7 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <AssignmentTabs
-          assignment={assignment}
+          assignment={normalizedAssignment}
           students={studentsWithStats}
           shareUrl={shareUrl}
         />

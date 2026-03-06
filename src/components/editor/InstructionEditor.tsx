@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BlockNoteEditor } from '@blocknote/core';
+import { BlockNoteViewEditor } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
 import '@blocknote/core/fonts/inter.css';
+import CenteredFormattingToolbar from './CenteredFormattingToolbar';
 
 interface InstructionEditorProps {
   initialContent?: string;
@@ -18,6 +20,7 @@ export default function InstructionEditor({
   editable = true
 }: InstructionEditorProps) {
   const [editor, setEditor] = useState<BlockNoteEditor | null>(null);
+  const initialContentRef = useRef(initialContent);
 
   useEffect(() => {
     let isMounted = true;
@@ -28,9 +31,9 @@ export default function InstructionEditor({
       activeEditor = newEditor;
 
       // Load initial markdown content
-      if (initialContent) {
+      if (initialContentRef.current) {
         try {
-          const blocks = await newEditor.tryParseMarkdownToBlocks(initialContent);
+          const blocks = await newEditor.tryParseMarkdownToBlocks(initialContentRef.current);
           newEditor.replaceBlocks(newEditor.document, blocks);
         } catch (error) {
           console.error('Failed to parse markdown:', error);
@@ -52,7 +55,7 @@ export default function InstructionEditor({
         activeEditor._tiptapEditor.destroy();
       }
     };
-  }, [initialContent]);
+  }, []);
 
   useEffect(() => {
     if (!editor || !onChange || !editable) return;
@@ -80,12 +83,20 @@ export default function InstructionEditor({
   }
 
   return (
-    <div className={editable ? "border border-gray-300 rounded-lg overflow-hidden min-h-[300px] max-h-[600px] overflow-y-auto" : "max-h-[600px] overflow-y-auto"}>
+    <div className={editable ? "border border-gray-300 rounded-lg overflow-hidden min-h-[300px] max-h-[600px]" : "max-h-[600px] overflow-y-auto"}>
       <BlockNoteView
         editor={editor}
         editable={editable}
         theme="light"
-      />
+        formattingToolbar={false}
+        renderEditor={false}
+        className={editable ? "flex h-full min-h-[300px] max-h-[600px] flex-col" : undefined}
+      >
+        {editable ? <CenteredFormattingToolbar /> : null}
+        <div className={editable ? "flex-1 min-h-0 overflow-y-auto" : undefined}>
+          <BlockNoteViewEditor />
+        </div>
+      </BlockNoteView>
     </div>
   );
 }

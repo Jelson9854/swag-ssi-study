@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import BackLink from '@/components/ui/BackLink';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { FileText, Brain, Globe } from 'lucide-react';
+import { FileText, ListChecks } from 'lucide-react';
+import AssignmentAssistantSettingsCard from '@/components/instructor/AssignmentAssistantSettingsCard';
+import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
 
 const InstructionEditor = dynamic(
   () => import('@/components/editor/InstructionEditor'),
@@ -18,9 +19,12 @@ const InstructionEditor = dynamic(
 
 export default function NewAssignmentPage() {
   const router = useRouter();
+  const criteriaToggleId = useId();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [instructions, setInstructions] = useState<string>('');
+  const [criteria, setCriteria] = useState<string>('');
+  const [useCriteria, setUseCriteria] = useState(false);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -28,11 +32,13 @@ export default function NewAssignmentPage() {
     setError(null);
 
     const formData = new FormData(e.currentTarget);
+    const trimmedCriteria = criteria.trim();
     const data = {
       title: formData.get('title') as string,
       instructions: instructions,
+      criteria: useCriteria && trimmedCriteria ? criteria : null,
       deadline: formData.get('deadline') as string,
-      customSystemPrompt: formData.get('customSystemPrompt') as string || null,
+      customSystemPrompt: resolveAssignmentAiGuidance(formData.get('customSystemPrompt') as string | null),
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
       strictPasteBlocking: formData.get('strictPasteBlocking') === 'on',
@@ -130,6 +136,45 @@ export default function NewAssignmentPage() {
                 </p>
               </div>
 
+              <div className="space-y-3 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id={criteriaToggleId}
+                    checked={useCriteria}
+                    onChange={(event) => setUseCriteria(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-[hsl(var(--input))] bg-[hsl(var(--background))] text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))]"
+                  />
+                  <div className="space-y-1">
+                    <label htmlFor={criteriaToggleId} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-[hsl(var(--foreground))]">
+                      <ListChecks className="h-4 w-4 text-[hsl(var(--primary))]" />
+                      Use Criteria
+                    </label>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Optionally provide a rubric or evaluation criteria. The editor opens only when this is enabled.
+                    </p>
+                  </div>
+                </div>
+
+                {useCriteria ? (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-[hsl(var(--foreground))]">
+                      Criteria
+                    </label>
+                    <div className="border border-[hsl(var(--input))] rounded-md overflow-hidden bg-[hsl(var(--background))]">
+                      <InstructionEditor
+                        initialContent={criteria}
+                        onChange={setCriteria}
+                        editable={true}
+                      />
+                    </div>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Use headings or bullet lists to define what good work should include.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+
               {/* Deadline */}
               <div className="space-y-2">
                 <label htmlFor="deadline" className="text-sm font-medium text-[hsl(var(--foreground))]">
@@ -148,91 +193,7 @@ export default function NewAssignmentPage() {
             </CardContent>
           </Card>
 
-          {/* AI Settings */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Brain className="w-5 h-5 text-[hsl(var(--primary))]" />
-                <CardTitle>AI Assistant Settings</CardTitle>
-              </div>
-              <CardDescription>Configure how the AI helps students with this assignment.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <label htmlFor="customSystemPrompt" className="text-sm font-medium text-[hsl(var(--foreground))]">
-                  Custom System Prompt (Optional)
-                </label>
-                <Textarea
-                  id="customSystemPrompt"
-                  name="customSystemPrompt"
-                  rows={4}
-                  placeholder="You are a helpful writing assistant for students. Help them brainstorm ideas, structure their essays, and improve their writing."
-                />
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Leave empty to use the default system prompt.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 p-3 border border-[hsl(var(--border))] rounded-lg bg-[hsl(var(--muted))]/20">
-                <input
-                  type="checkbox"
-                  id="includeInstructionInPrompt"
-                  name="includeInstructionInPrompt"
-                  className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
-                />
-                <label htmlFor="includeInstructionInPrompt" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
-                  Include instructions in system prompt
-                </label>
-              </div>
-
-              {/* Web Search Toggle */}
-              <div className="p-4 bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] rounded-lg">
-                <div className="flex items-center gap-3 mb-2">
-                  <input
-                    type="checkbox"
-                    id="allowWebSearch"
-                    name="allowWebSearch"
-                    className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
-                  />
-                  <div className="flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-                    <label htmlFor="allowWebSearch" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
-                      Allow Web Search
-                    </label>
-                  </div>
-                </div>
-                <p className="text-sm text-[hsl(var(--muted-foreground))] ml-7">
-                  Allows students to use real-time web search during their writing session.
-                  <br />
-                  <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
-                    Recommended only if external research is required.
-                  </span>
-                </p>
-              </div>
-
-              {/* Strict Paste Blocking Toggle */}
-              <div className="p-4 bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] rounded-lg">
-                <div className="flex items-center gap-3 mb-2">
-                  <input
-                    type="checkbox"
-                    id="strictPasteBlocking"
-                    name="strictPasteBlocking"
-                    className="h-4 w-4 text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))] border-[hsl(var(--input))] rounded bg-[hsl(var(--background))]"
-                  />
-                  <label htmlFor="strictPasteBlocking" className="text-sm font-medium text-[hsl(var(--foreground))] cursor-pointer select-none">
-                    Strictly Block External Paste
-                  </label>
-                </div>
-                <p className="text-sm text-[hsl(var(--muted-foreground))] ml-7">
-                  When enabled, external clipboard content is blocked before it can be inserted into the student editor.
-                  <br />
-                  <span className="text-[hsl(var(--destructive))] opacity-80 text-xs font-semibold mt-1 block">
-                    Use this for assignments that require fully in-system drafting.
-                  </span>
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <AssignmentAssistantSettingsCard />
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 pt-4">

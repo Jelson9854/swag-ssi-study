@@ -7,7 +7,7 @@ import ChatPanel from '../chat/ChatPanel';
 import { useUIStore } from '@/stores/uiStore';
 import SubmissionModal from './SubmissionModal';
 import { Button } from '@/components/ui/button';
-import { FileText, History, Send, Bot, Check, Loader2 } from 'lucide-react';
+import { FileText, History, Send, Bot, Check, Loader2, ListChecks } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getGlobalValidator } from '@/lib/copy-validator';
@@ -18,6 +18,7 @@ interface EditorClientProps {
   assignmentId: string;
   assignmentTitle: string;
   assignmentInstructions: string;
+  assignmentCriteria: string | null;
   deadline: Date;
   allowWebSearch: boolean;
   strictPasteBlocking: boolean;
@@ -28,11 +29,13 @@ export default function EditorClient({
   assignmentId,
   assignmentTitle,
   assignmentInstructions,
+  assignmentCriteria,
   deadline,
   allowWebSearch,
   strictPasteBlocking,
 }: EditorClientProps) {
   const validator = getGlobalValidator();
+  const hasCriteria = Boolean(assignmentCriteria?.trim());
 
   const {
     isChatOpen,
@@ -57,10 +60,14 @@ export default function EditorClient({
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<number | null>(null);
   const [isSubmissionModalOpen, setIsSubmissionModalOpen] = useState(false);
   const [hasChangesAfterSubmit, setHasChangesAfterSubmit] = useState(false);
+  const [showCriteria, setShowCriteria] = useState(false);
 
   useEffect(() => {
     validator.registerInstruction(assignmentInstructions);
-  }, [assignmentInstructions, validator]);
+    if (assignmentCriteria) {
+      validator.registerInstruction(assignmentCriteria);
+    }
+  }, [assignmentCriteria, assignmentInstructions, validator]);
 
   // Listen for save events
   useEffect(() => {
@@ -196,6 +203,20 @@ export default function EditorClient({
                   <FileText className="w-4 h-4 mr-1" />
                   {showInstructions ? 'Hide Instructions' : 'View Instructions'}
                 </Button>
+                {hasCriteria ? (
+                  <>
+                    <span className="text-[hsl(var(--border))]">•</span>
+                    <Button
+                      onClick={() => setShowCriteria((current) => !current)}
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto p-0 text-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]/80 font-medium hover:bg-transparent"
+                    >
+                      <ListChecks className="w-4 h-4 mr-1" />
+                      {showCriteria ? 'Hide Criteria' : 'View Criteria'}
+                    </Button>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
@@ -265,6 +286,24 @@ export default function EditorClient({
               </div>
             </div>
           )}
+
+          {showCriteria && hasCriteria ? (
+            <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
+              <div className="max-w-4xl mx-auto p-6">
+                <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Criteria</h2>
+                <div
+                  className="prose prose-sm max-w-none max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg p-4 border border-[hsl(var(--border))]"
+                  onCopy={handleInstructionCopy}
+                >
+                  <div className="text-[hsl(var(--foreground))] prose prose-sm max-w-none dark:prose-invert">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {assignmentCriteria || ''}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {/* Editor */}
           <div className="flex-1 min-h-0 px-6 pb-6 pt-2">

@@ -1,6 +1,7 @@
 import OpenAI, { APIConnectionError, AuthenticationError, RateLimitError } from 'openai';
 import { db } from '@/db/db';
 import { assignments, chatMessages } from '@/db/schema';
+import { buildAssignmentAiGuidance } from '@/lib/assignment-ai';
 import { eq } from 'drizzle-orm';
 
 interface ChatErrorDetails {
@@ -118,7 +119,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // Fetch assignment to get custom system prompt
+    // Fetch assignment to get AI guidance configuration
     const assignment = await db.query.assignments.findFirst({
       where: eq(assignments.id, assignmentId),
     });
@@ -131,14 +132,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // Build system prompt
-    let systemPrompt =
-      assignment.customSystemPrompt ||
-      'You are a helpful writing assistant for students. Help them brainstorm ideas, structure their essays, and improve their writing. Encourage critical thinking and original work.';
-
-    if (assignment.includeInstructionInPrompt) {
-      systemPrompt += `\n\nAssignment Instructions:\n${assignment.instructions}`;
-    }
+    const systemPrompt = buildAssignmentAiGuidance({
+      guidance: assignment.customSystemPrompt,
+      instructions: assignment.instructions,
+      includeInstructions: assignment.includeInstructionInPrompt ?? false,
+    });
 
     // Save user message immediately
     const lastMessage = messages[messages.length - 1];

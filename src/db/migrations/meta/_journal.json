@@ -57,6 +57,20 @@
       "when": 1771977600000,
       "tag": "0007_editor_event_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1772838127547,
+      "tag": "0008_add_assignment_criteria",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1772839200000,
+      "tag": "0009_assignment_ai_guidance_default",
+      "breakpoints": true
     }
   ]
 }

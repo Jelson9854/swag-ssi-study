@@ -1,4 +1,5 @@
 import { pgTable, text, timestamp, boolean, serial, jsonb, index, integer } from 'drizzle-orm/pg-core';
+import { DEFAULT_ASSIGNMENT_AI_GUIDANCE } from '../lib/assignment-ai';
 
 // Instructor table for Phase 2
 export const instructors = pgTable('instructors', {
@@ -31,11 +32,12 @@ export const assignments = pgTable('assignments', {
   id: text('id').primaryKey(),
   title: text('title').notNull(),
   instructions: text('instructions').notNull(),
+  criteria: text('criteria'),
   deadline: timestamp('deadline').notNull(),
   shareToken: text('share_token').unique().notNull(),
   // Phase 2 fields
   instructorId: text('instructor_id'), // nullable for Phase 1
-  customSystemPrompt: text('custom_system_prompt'), // nullable
+  customSystemPrompt: text('custom_system_prompt').notNull().default(DEFAULT_ASSIGNMENT_AI_GUIDANCE),
   includeInstructionInPrompt: boolean('include_instruction_in_prompt').default(false),
   allowWebSearch: boolean('allow_web_search').default(false),
   strictPasteBlocking: boolean('strict_paste_blocking').default(false),

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/db/db';
 import { assignments, instructors } from '@/db/schema';
+import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
     const {
       title,
       instructions,
+      criteria,
       deadline,
       customSystemPrompt,
       includeInstructionInPrompt,
@@ -77,10 +79,11 @@ export async function POST(request: Request) {
       id: assignmentId,
       title,
       instructions,
+      criteria: typeof criteria === 'string' && criteria.trim() ? criteria : null,
       deadline: deadlineDate,
       shareToken,
       instructorId: instructor.id,
-      customSystemPrompt: customSystemPrompt || null,
+      customSystemPrompt: resolveAssignmentAiGuidance(customSystemPrompt),
       includeInstructionInPrompt: includeInstructionInPrompt || false,
       allowWebSearch: allowWebSearch || false,
       strictPasteBlocking: strictPasteBlocking || false,

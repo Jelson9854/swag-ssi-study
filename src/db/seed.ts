@@ -1,5 +1,6 @@
 import { db } from './db';
 import { assignments } from './schema';
+import { DEFAULT_ASSIGNMENT_AI_GUIDANCE } from '../lib/assignment-ai';
 
 async function seed() {
   console.log('🌱 Seeding database...');
@@ -18,7 +19,7 @@ Consider the following questions:
 Use the chatbot to help you brainstorm ideas, but make sure your final essay reflects your own critical thinking.`,
     deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
     shareToken: 'test-assignment-123', // Fixed token for testing
-    customSystemPrompt: null,
+    customSystemPrompt: DEFAULT_ASSIGNMENT_AI_GUIDANCE,
     includeInstructionInPrompt: false,
     instructorId: null,
     createdAt: new Date(),

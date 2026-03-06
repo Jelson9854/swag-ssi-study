@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/db/db';
 import { assignments, instructors, studentSessions, editorEvents, chatConversations, chatMessages } from '@/db/schema';
+import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
 import { eq, and } from 'drizzle-orm';
 
 async function getInstructor() {
@@ -81,6 +82,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     const {
       title,
       instructions,
+      criteria,
       deadline,
       customSystemPrompt,
       includeInstructionInPrompt,
@@ -108,8 +110,9 @@ export async function PUT(request: Request, { params }: RouteParams) {
       .set({
         title,
         instructions,
+        criteria: typeof criteria === 'string' && criteria.trim() ? criteria : null,
         deadline: deadlineDate,
-        customSystemPrompt: customSystemPrompt || null,
+        customSystemPrompt: resolveAssignmentAiGuidance(customSystemPrompt),
         includeInstructionInPrompt: includeInstructionInPrompt || false,
         allowWebSearch: allowWebSearch || false,
         strictPasteBlocking: strictPasteBlocking || false,

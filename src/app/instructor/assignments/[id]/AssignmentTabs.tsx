@@ -5,13 +5,16 @@ import CopyLinkButton from '@/components/instructor/CopyLinkButton';
 import StudentTable from './StudentTable';
 import InstructionEditor from '@/components/editor/InstructionEditor';
 import { Card, CardContent } from '@/components/ui/card';
-import { Link as LinkIcon, Users, FileText, Brain } from 'lucide-react';
+import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
+import { Link as LinkIcon, Users, FileText, Brain, ListChecks } from 'lucide-react';
 
 interface Assignment {
   id: string;
   title: string;
   instructions: string;
+  criteria: string | null;
   customSystemPrompt: string | null;
+  includeInstructionInPrompt: boolean;
   deadline: Date;
   shareToken: string;
 }
@@ -99,17 +102,37 @@ export default function AssignmentTabs({ assignment, students, shareUrl }: Assig
                 </div>
               </div>
 
-              {assignment.customSystemPrompt && (
+              {assignment.criteria ? (
                 <div className="space-y-3">
                   <h3 className="text-sm font-medium text-[hsl(var(--foreground))] flex items-center gap-2 border-b border-[hsl(var(--border))] pb-2">
-                    <Brain className="w-4 h-4 text-[hsl(var(--primary))]" />
-                    Custom System Prompt
+                    <ListChecks className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+                    Criteria
                   </h3>
-                  <div className="bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] p-4 rounded-md">
-                    <p className="text-sm text-[hsl(var(--muted-foreground))] font-mono whitespace-pre-wrap">{assignment.customSystemPrompt}</p>
+                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                    <InstructionEditor
+                      initialContent={assignment.criteria}
+                      editable={false}
+                    />
                   </div>
                 </div>
-              )}
+              ) : null}
+
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-[hsl(var(--foreground))] flex items-center gap-2 border-b border-[hsl(var(--border))] pb-2">
+                  <Brain className="w-4 h-4 text-[hsl(var(--primary))]" />
+                  How the AI helps
+                </h3>
+                <div className="space-y-3 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-4">
+                  <p className="whitespace-pre-wrap text-sm text-[hsl(var(--muted-foreground))]">
+                    {resolveAssignmentAiGuidance(assignment.customSystemPrompt)}
+                  </p>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    {assignment.includeInstructionInPrompt
+                      ? 'The AI also receives the assignment instructions for more task-specific help.'
+                      : 'The AI uses only the guidance above unless the assignment instructions are shared separately.'}
+                  </p>
+                </div>
+              </div>
             </CardContent>
           </TabPanel>
         </TabPanels>
