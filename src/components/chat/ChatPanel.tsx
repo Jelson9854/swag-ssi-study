@@ -164,6 +164,7 @@ function ChatPanel({
   const shownMessages = isReplayMode ? replayVisibleMessages : messages;
   const replayInputText = replayInputState?.text ?? '';
   const replayInputWebSearchEnabled = replayInputState?.webSearchEnabled ?? false;
+  const isWebSearchActive = isReplayMode ? replayInputWebSearchEnabled : webSearchEnabled;
 
   const trackChatInputState = useCallback(
     (
@@ -525,27 +526,37 @@ function ChatPanel({
                 />
 
                 {/* Web Search Toggle and Send Button Row */}
-                <div className="flex items-center justify-between">
-                  {/* Web Search Toggle - Ghost style (only show if allowed by instructor) */}
-                  {allowWebSearch ? (
-                    <Button
+                <div className="flex items-center justify-end gap-2">
+                  {/* Web Search Toggle */}
+                  {allowWebSearch && (
+                    <button
                       type="button"
                       onClick={isReplayMode ? undefined : handleWebSearchToggle}
                       disabled={isReplayMode}
-                      variant="ghost"
-                      size="sm"
-                      className={`flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${(
-                        isReplayMode ? replayInputWebSearchEnabled : webSearchEnabled
-                      )
-                        ? 'text-sky-500 bg-sky-500/10 hover:bg-sky-500/20'
-                        : 'text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))]'
-                        }`}
+                      aria-pressed={isWebSearchActive}
+                      title={isWebSearchActive ? 'Turn off web search' : 'Turn on web search'}
+                      className={`flex h-10 w-44 items-center justify-between rounded-full px-3 transition-colors ${
+                        isWebSearchActive
+                          ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))] hover:bg-[hsl(var(--foreground))]/90'
+                          : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]'
+                      } ${
+                        isReplayMode ? 'cursor-default opacity-60 hover:bg-inherit hover:text-inherit' : ''
+                      }`}
                     >
-                      <Globe className="w-4 h-4" />
-                      <span>Web search</span>
-                    </Button>
-                  ) : (
-                    <div />
+                      <span className="flex items-center gap-2 whitespace-nowrap">
+                        <Globe className="w-4 h-4" />
+                        <span className="whitespace-nowrap text-sm font-medium">Web Search</span>
+                      </span>
+                      <span
+                        className={`flex h-6 min-w-10 items-center justify-center rounded-full px-2 text-[10px] font-semibold tracking-[0.14em] ${
+                          isWebSearchActive
+                            ? 'bg-[hsl(var(--background))]/15 text-[hsl(var(--background))]'
+                            : 'bg-[hsl(var(--background))] text-[hsl(var(--foreground))]'
+                        }`}
+                      >
+                        {isWebSearchActive ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
                   )}
 
                   {/* Send Button - Circular */}
@@ -557,7 +568,7 @@ function ChatPanel({
                       isLoading ||
                       !activeConversationId
                     }
-                    className={`p-2 rounded-full transition-colors flex items-center justify-center ${
+                    className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
                       !isReplayMode && input.trim() && activeConversationId && !isLoading
                       ? 'bg-[hsl(var(--foreground))] hover:bg-[hsl(var(--foreground))]/90 text-[hsl(var(--background))]'
                       : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] cursor-not-allowed'

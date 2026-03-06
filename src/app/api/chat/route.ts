@@ -1,11 +1,106 @@
-import OpenAI from 'openai';
+import OpenAI, { APIConnectionError, AuthenticationError, RateLimitError } from 'openai';
 import { db } from '@/db/db';
 import { assignments, chatMessages } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+interface ChatErrorDetails {
+  status: number;
+  code: string;
+  message: string;
+}
+
+const DEFAULT_CHAT_ERROR_MESSAGE =
+  'The AI assistant ran into a problem and could not complete that reply. Please try again.';
+
+const EMPTY_ASSISTANT_RESPONSE_MESSAGE =
+  'The AI assistant returned an empty response. Please try again.';
+
+const jsonError = (details: ChatErrorDetails) =>
+  Response.json(
+    {
+      error: {
+        code: details.code,
+        message: details.message,
+      },
+    },
+    { status: details.status }
+  );
+
+const resolveChatError = (error: unknown): ChatErrorDetails => {
+  if (error instanceof AuthenticationError) {
+    return {
+      status: 502,
+      code: 'OPENAI_AUTHENTICATION_FAILED',
+      message:
+        'The AI assistant is unavailable because the server OpenAI credentials were rejected. Please ask an administrator to verify OPENAI_API_KEY.',
+    };
+  }
+
+  if (error instanceof RateLimitError) {
+    return {
+      status: 429,
+      code: 'OPENAI_RATE_LIMITED',
+      message:
+        'The AI assistant is temporarily rate limited. Please wait a moment and try again.',
+    };
+  }
+
+  if (error instanceof APIConnectionError) {
+    return {
+      status: 503,
+      code: 'OPENAI_CONNECTION_FAILED',
+      message:
+        'The AI assistant could not reach OpenAI right now. Please try again in a moment.',
+    };
+  }
+
+  return {
+    status: 500,
+    code: 'CHAT_REQUEST_FAILED',
+    message: DEFAULT_CHAT_ERROR_MESSAGE,
+  };
+};
+
+const createOpenAIClient = () => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+
+  return new OpenAI({ apiKey });
+};
+
+const persistAssistantMessage = async ({
+  conversationId,
+  content,
+  metadata,
+}: {
+  conversationId: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}) => {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    return;
+  }
+
+  try {
+    const existingMessages = await db.query.chatMessages.findMany({
+      where: eq(chatMessages.conversationId, conversationId),
+    });
+
+    await db.insert(chatMessages).values({
+      conversationId,
+      role: 'assistant',
+      content: trimmedContent,
+      metadata,
+      timestamp: new Date(),
+      sequenceNumber: existingMessages.length,
+    });
+  } catch (error) {
+    console.error('Failed to persist assistant message:', error);
+  }
+};
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +111,11 @@ export async function POST(req: Request) {
     // Validate conversationId
     if (!conversationId) {
       console.error('Missing conversationId');
-      return new Response('Conversation ID is required', { status: 400 });
+      return jsonError({
+        status: 400,
+        code: 'MISSING_CONVERSATION_ID',
+        message: 'Conversation ID is required.',
+      });
     }
 
     // Fetch assignment to get custom system prompt
@@ -25,7 +124,11 @@ export async function POST(req: Request) {
     });
 
     if (!assignment) {
-      return new Response('Assignment not found', { status: 404 });
+      return jsonError({
+        status: 404,
+        code: 'ASSIGNMENT_NOT_FOUND',
+        message: 'The chat assignment configuration could not be found.',
+      });
     }
 
     // Build system prompt
@@ -61,16 +164,55 @@ export async function POST(req: Request) {
       content: msg.content,
     }));
 
+    const openai = createOpenAIClient();
+    if (!openai) {
+      const details: ChatErrorDetails = {
+        status: 503,
+        code: 'OPENAI_NOT_CONFIGURED',
+        message:
+          'The AI assistant is unavailable because OPENAI_API_KEY is not configured on the server.',
+      };
+
+      await persistAssistantMessage({
+        conversationId,
+        content: details.message,
+        metadata: {
+          isError: true,
+          errorCode: details.code,
+          webSearchEnabled: webSearchEnabled || false,
+        },
+      });
+
+      return jsonError(details);
+    }
+
     // Create streaming response using OpenAI Responses API
-    const stream = await openai.responses.create({
-      model: 'gpt-4o',
-      input: [
-        { id: 'msg_system', role: 'system', content: systemPrompt },
-        ...formattedMessages,
-      ],
-      tools: webSearchEnabled ? [{ type: 'web_search' }] : undefined,
-      stream: true,
-    });
+    let stream;
+    try {
+      stream = await openai.responses.create({
+        model: 'gpt-4o',
+        input: [
+          { id: 'msg_system', role: 'system', content: systemPrompt },
+          ...formattedMessages,
+        ],
+        tools: webSearchEnabled ? [{ type: 'web_search' }] : undefined,
+        stream: true,
+      });
+    } catch (error) {
+      const details = resolveChatError(error);
+
+      await persistAssistantMessage({
+        conversationId,
+        content: details.message,
+        metadata: {
+          isError: true,
+          errorCode: details.code,
+          webSearchEnabled: webSearchEnabled || false,
+        },
+      });
+
+      return jsonError(details);
+    }
 
     // Convert OpenAI stream to Response stream
     const encoder = new TextEncoder();
@@ -99,28 +241,52 @@ export async function POST(req: Request) {
             }
           }
 
-          // Save assistant message to database after streaming completes
-          const updatedMessages = await db.query.chatMessages.findMany({
-            where: eq(chatMessages.conversationId, conversationId),
-          });
+          const finalContent = fullResponse.trim() || EMPTY_ASSISTANT_RESPONSE_MESSAGE;
 
-          await db.insert(chatMessages).values({
+          if (!fullResponse.trim()) {
+            controller.enqueue(encoder.encode(finalContent));
+          }
+
+          await persistAssistantMessage({
             conversationId,
-            role: 'assistant',
-            content: fullResponse,
+            content: finalContent,
             metadata: {
               model: 'gpt-4o',
               webSearchEnabled: webSearchEnabled || false,
               webSearchUsed,
+              ...(fullResponse.trim()
+                ? {}
+                : {
+                    isError: true,
+                    errorCode: 'EMPTY_RESPONSE',
+                  }),
             },
-            timestamp: new Date(),
-            sequenceNumber: updatedMessages.length,
           });
 
           controller.close();
         } catch (error) {
+          const details = resolveChatError(error);
           console.error('Streaming error:', error);
-          controller.error(error);
+
+          const recoveryText = fullResponse.trim()
+            ? `\n\n${details.message}`
+            : details.message;
+
+          controller.enqueue(encoder.encode(recoveryText));
+
+          await persistAssistantMessage({
+            conversationId,
+            content: `${fullResponse}${recoveryText}`,
+            metadata: {
+              model: 'gpt-4o',
+              webSearchEnabled: webSearchEnabled || false,
+              webSearchUsed,
+              isError: true,
+              errorCode: details.code,
+            },
+          });
+
+          controller.close();
         }
       },
     });
@@ -133,6 +299,6 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error('Chat API error:', error);
-    return new Response('Internal server error', { status: 500 });
+    return jsonError(resolveChatError(error));
   }
 }

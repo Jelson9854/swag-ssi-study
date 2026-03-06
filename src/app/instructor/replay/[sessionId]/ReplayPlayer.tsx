@@ -72,6 +72,29 @@ interface ReplayPlayerProps {
 
 const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
 
+const REPLAY_SHORTCUTS = [
+  {
+    keys: ['Space'],
+    title: 'Play or pause',
+    description: 'Toggle playback. If the replay is already at the end, it restarts from the beginning.',
+  },
+  {
+    keys: ['←', '→'],
+    title: 'Jump between events',
+    description: 'Use left arrow for the previous major event and right arrow for the next one.',
+  },
+  {
+    keys: ['W'],
+    title: 'Toggle word count',
+    description: 'Show or hide the word count graph when replay word count data is available.',
+  },
+  {
+    keys: ['-', '= / +'],
+    title: 'Adjust speed',
+    description: 'Use - to slow down one step, and = or + to speed up one step through the preset replay speeds.',
+  },
+] as const;
+
 interface WordCountTimelineEntry {
   timestamp: number;
   wordCount: number;
@@ -658,13 +681,29 @@ export default function ReplayPlayer({
   const authorshipVersionRef = useRef<number>(0);
   const lastAppliedAuthorshipOverlayKeyRef = useRef<string>('init');
   const loggedStepFailureSeqsRef = useRef<Set<number>>(new Set());
+  const shortcutsDialogRef = useRef<HTMLDialogElement>(null);
   const totalWordCountGradientId = useId();
   const gptWordCountGradientId = useId();
+  const replayShortcutsDialogTitleId = useId();
+  const replayShortcutsDialogDescriptionId = useId();
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
   const lastReplayFrameKeyRef = useRef<string>('');
   const lastProcessedReplayTimeRef = useRef<number>(startTime);
+
+  const openShortcutsDialog = useCallback(() => {
+    const dialog = shortcutsDialogRef.current;
+    if (!dialog || dialog.open) {
+      return;
+    }
+
+    dialog.showModal();
+  }, []);
+
+  const closeShortcutsDialog = useCallback(() => {
+    shortcutsDialogRef.current?.close();
+  }, []);
 
   // Create BlockNote editor for replay
   const editor = useCreateBlockNote({
@@ -1761,6 +1800,30 @@ export default function ReplayPlayer({
     wordCountGraphData.length > 1 || wordCountGraphData.some((point) => point.wordCount > 0)
   ), [wordCountGraphData]);
 
+  const toggleWordCountGraph = useCallback(() => {
+    if (!hasWordCountData) {
+      return;
+    }
+
+    setIsWordCountGraphExpanded((prev) => !prev);
+  }, [hasWordCountData]);
+
+  const stepReplaySpeed = useCallback((direction: -1 | 1) => {
+    setSpeed((currentSpeed) => {
+      const currentIndex = SPEED_OPTIONS.indexOf(currentSpeed);
+      if (currentIndex === -1) {
+        return currentSpeed;
+      }
+
+      const nextIndex = Math.min(
+        SPEED_OPTIONS.length - 1,
+        Math.max(0, currentIndex + direction)
+      );
+
+      return SPEED_OPTIONS[nextIndex] ?? currentSpeed;
+    });
+  }, []);
+
   const breakGraphMarkerPositions = useMemo(() => {
     if (compressedDuration <= 0) {
       return [];
@@ -2114,8 +2177,16 @@ export default function ReplayPlayer({
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (e.metaKey || e.ctrlKey || e.altKey || shortcutsDialogRef.current?.open) {
+        return;
+      }
+
+      // Ignore if user is typing in an editable field.
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
+      ) {
         return;
       }
 
@@ -2150,12 +2221,26 @@ export default function ReplayPlayer({
             setCurrentTime(navigableEvents[0].time);
           }
           break;
+        case 'KeyW':
+          e.preventDefault();
+          toggleWordCountGraph();
+          break;
+        case 'Minus':
+        case 'NumpadSubtract':
+          e.preventDefault();
+          stepReplaySpeed(-1);
+          break;
+        case 'Equal':
+        case 'NumpadAdd':
+          e.preventDefault();
+          stepReplaySpeed(1);
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentTime, navigableEvents, speed, startTime, endTime]);
+  }, [currentTime, navigableEvents, speed, startTime, endTime, stepReplaySpeed, toggleWordCountGraph]);
 
   const replayConversationsForPanel = useMemo(
     () => conversations.map((conversation) => ({
@@ -2478,10 +2563,21 @@ export default function ReplayPlayer({
           {/* Event Navigation Dropdown */}
           <div className="flex items-center gap-2">
             <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={openShortcutsDialog}
+              aria-haspopup="dialog"
+            >
+              <Keyboard className="w-4 h-4" />
+              Shortcuts
+            </Button>
+
+            <Button
               variant={isWordCountGraphExpanded ? 'primary' : 'outline'}
               size="sm"
               className="gap-2"
-              onClick={() => setIsWordCountGraphExpanded((prev) => !prev)}
+              onClick={toggleWordCountGraph}
               disabled={!hasWordCountData}
             >
               <BarChart3 className="w-4 h-4" />
@@ -2670,6 +2766,130 @@ export default function ReplayPlayer({
           </div>
         )}
       </div>
+
+      <dialog
+        ref={shortcutsDialogRef}
+        aria-labelledby={replayShortcutsDialogTitleId}
+        aria-describedby={replayShortcutsDialogDescriptionId}
+        className="m-auto w-[min(56rem,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-slate-200/80 bg-[hsl(var(--card))] p-0 text-[hsl(var(--card-foreground))] shadow-[0_32px_80px_rgba(15,23,42,0.28)] backdrop:bg-slate-950/60"
+        onClick={(event) => {
+          const dialog = shortcutsDialogRef.current;
+          if (!dialog) {
+            return;
+          }
+
+          const rect = dialog.getBoundingClientRect();
+          const isInsideBounds = (
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom
+          );
+
+          if (!isInsideBounds) {
+            dialog.close();
+          }
+        }}
+      >
+        <div className="grid md:grid-cols-[18rem_minmax(0,1fr)]">
+          <div className="border-b border-slate-200/80 bg-[linear-gradient(180deg,rgba(219,234,254,0.8),rgba(255,255,255,0.92))] p-6 md:border-b-0 md:border-r md:p-7">
+            <div className="inline-flex items-center rounded-full border border-sky-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 shadow-sm">
+              Replay controls
+            </div>
+            <h2 id={replayShortcutsDialogTitleId} className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">
+              Keyboard shortcuts
+            </h2>
+            <p
+              id={replayShortcutsDialogDescriptionId}
+              className="mt-3 text-sm leading-6 text-slate-600"
+            >
+              Key commands for scrubbing, playback control, speed changes, and the word count panel.
+            </p>
+
+            <div className="mt-6 space-y-3">
+              <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm">
+                <p className="text-2xl font-semibold text-slate-900">{REPLAY_SHORTCUTS.length}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
+                  Available shortcuts
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm">
+                <p className="text-sm font-medium text-slate-900">When they work</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Shortcuts are active only when focus is outside inputs and this modal is closed.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-slate-900 px-4 py-3 text-slate-100 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-slate-300">Quick close</p>
+                <p className="mt-1 text-sm">
+                  Press <span className="font-semibold text-white">Esc</span> or click outside the dialog.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[hsl(var(--card))] p-6 md:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[hsl(var(--muted-foreground))]">
+                  Shortcut map
+                </p>
+                <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                  Playback commands are arranged by what you most often do while reviewing a session.
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 shrink-0 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--background))]"
+                onClick={closeShortcutsDialog}
+                aria-label="Close keyboard shortcuts dialog"
+              >
+                <span aria-hidden="true" className="text-lg leading-none">×</span>
+              </Button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {REPLAY_SHORTCUTS.map((shortcut) => (
+                <div
+                  key={`${shortcut.title}-${shortcut.keys.join('-')}`}
+                  className="flex min-h-32 flex-col justify-between rounded-2xl border border-[hsl(var(--border))] bg-[linear-gradient(180deg,hsl(var(--background)),rgba(248,250,252,0.95))] p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-[hsl(var(--foreground))]">
+                        {shortcut.title}
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-[hsl(var(--muted-foreground))]">
+                        {shortcut.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    {shortcut.keys.map((key) => (
+                      <kbd
+                        key={key}
+                        className="min-w-12 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-center text-xs font-semibold text-slate-700 shadow-[inset_0_-1px_0_rgba(148,163,184,0.35)]"
+                      >
+                        {key}
+                      </kbd>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 flex items-center justify-end border-t border-[hsl(var(--border))] pt-4">
+              <Button type="button" size="sm" onClick={closeShortcutsDialog}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      </dialog>
 
       {/* Timeline Tooltip */}
       <TimelineTooltip

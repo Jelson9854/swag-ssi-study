@@ -14,6 +14,8 @@ export interface Message {
   conversationTitle?: string;
   timestamp?: number;
   metadata?: {
+    isError?: boolean;
+    errorCode?: string;
     webSearchEnabled?: boolean;
     webSearchUsed?: boolean;
     [key: string]: unknown;
@@ -65,6 +67,84 @@ const initialState = {
   isLoading: false,
   isCreatingConversation: false,
   webSearchEnabled: false,
+};
+
+const DEFAULT_CHAT_ERROR_MESSAGE =
+  'The AI assistant ran into a problem and could not complete that reply. Please try again.';
+
+interface ChatErrorResponse {
+  error?: {
+    code?: string;
+    message?: string;
+  };
+}
+
+const createAssistantErrorMessage = (content: string, code?: string): Message => ({
+  id: `msg_${Date.now()}_error`,
+  role: 'assistant',
+  content,
+  metadata: {
+    isError: true,
+    errorCode: code,
+  },
+});
+
+const getFallbackErrorMessageForStatus = (status: number): string => {
+  switch (status) {
+    case 400:
+      return 'The chat request was invalid. Please try again.';
+    case 404:
+      return 'The chat assistant configuration could not be found.';
+    case 429:
+      return 'The AI assistant is temporarily rate limited. Please wait a moment and try again.';
+    case 503:
+      return 'The AI assistant is temporarily unavailable. Please try again in a moment.';
+    default:
+      return DEFAULT_CHAT_ERROR_MESSAGE;
+  }
+};
+
+const readChatErrorResponse = async (response: Response): Promise<{ message: string; code?: string }> => {
+  const rawBody = await response.text();
+
+  if (rawBody.trim()) {
+    try {
+      const parsed = JSON.parse(rawBody) as ChatErrorResponse;
+      if (parsed.error?.message) {
+        return {
+          message: parsed.error.message,
+          code: parsed.error.code,
+        };
+      }
+    } catch {
+      return { message: rawBody.trim() };
+    }
+  }
+
+  return {
+    message: getFallbackErrorMessageForStatus(response.status),
+  };
+};
+
+const getThrownErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return DEFAULT_CHAT_ERROR_MESSAGE;
+};
+
+const getThrownErrorCode = (error: unknown): string | undefined => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+  ) {
+    return error.code;
+  }
+
+  return undefined;
 };
 
 export const useChatStore = create<ChatState>()(
@@ -241,6 +321,10 @@ export const useChatStore = create<ChatState>()(
           isLoading: true,
         }));
 
+        const assistantMessageId = `msg_${Date.now() + 1}`;
+        let assistantContent = '';
+        let hasAssistantPlaceholder = false;
+
         try {
           const response = await fetch('/api/chat', {
             method: 'POST',
@@ -255,7 +339,10 @@ export const useChatStore = create<ChatState>()(
           });
 
           if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const { message, code } = await readChatErrorResponse(response);
+            const error = new Error(message) as Error & { code?: string };
+            error.code = code;
+            throw error;
           }
 
           // Read streaming response
@@ -267,8 +354,7 @@ export const useChatStore = create<ChatState>()(
           }
 
           // Create assistant message placeholder
-          const assistantMessageId = `msg_${Date.now() + 1}`;
-          let assistantContent = '';
+          hasAssistantPlaceholder = true;
 
           set((state) => ({
             messages: [
@@ -300,6 +386,37 @@ export const useChatStore = create<ChatState>()(
           }
         } catch (error) {
           console.error('Failed to send message:', error);
+
+          const errorMessage = getThrownErrorMessage(error);
+          const errorCode = getThrownErrorCode(error);
+
+          set((state) => {
+            if (hasAssistantPlaceholder) {
+              if (assistantContent.trim()) {
+                return {
+                  messages: [
+                    ...state.messages,
+                    createAssistantErrorMessage(errorMessage, errorCode),
+                  ],
+                };
+              }
+
+              return {
+                messages: state.messages.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? createAssistantErrorMessage(errorMessage, errorCode)
+                    : msg
+                ),
+              };
+            }
+
+            return {
+              messages: [
+                ...state.messages,
+                createAssistantErrorMessage(errorMessage, errorCode),
+              ],
+            };
+          });
         } finally {
           set({ isLoading: false });
         }
