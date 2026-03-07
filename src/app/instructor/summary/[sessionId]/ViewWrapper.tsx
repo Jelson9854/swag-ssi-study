@@ -5,13 +5,15 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   Clock,
   Type,
   MessageSquare,
   FileEdit,
   ChevronLeft,
-  PlayCircle
+  PlayCircle,
+  Info,
 } from 'lucide-react';
 
 const ViewClient = dynamic(() => import('./ViewClient'), {
@@ -130,9 +132,14 @@ const countWordsFromDocument = (document: unknown): number => {
 
 const formatDurationWithHours = (ms: number): string => {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  }
 
   if (hours > 0) {
     return `${hours}h ${minutes}m ${seconds}s`;
@@ -143,6 +150,72 @@ const formatDurationWithHours = (ms: number): string => {
 const truncateText = (text: string, maxLength: number): string => {
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1)}…`;
+};
+
+const formatContributionPercentage = (value: number | null): string => {
+  if (value === null) {
+    return 'N/A';
+  }
+
+  return `${(value * 100).toFixed(1)}%`;
+};
+
+const formatContributionCount = (value: number, isExact: boolean): string => {
+  if (!isExact) {
+    return 'N/A';
+  }
+
+  return value.toLocaleString();
+};
+
+const buildContributionMetricTooltipHtml = (
+  metric: 'hcr' | 'her',
+  contributionMetrics: SubmissionContributionMetrics
+): string => {
+  const title = metric === 'hcr' ? 'Human Contribution Ratio (HCR)' : 'Human Edit Ratio (HER)';
+  const description = metric === 'hcr'
+    ? 'How much of the final essay remains human-written after subtracting later deletions.'
+    : 'How much of the total writing and editing activity was done by the student.';
+  const formula = metric === 'hcr'
+    ? '(HA - HD) / ((HA - HD) + (GP - GD))'
+    : '(HA + HD + GD) / (HA + HD + GP + GD)';
+  const availabilityNote = contributionMetrics.isExact
+    ? ''
+    : '<div style="margin-top:8px;color:hsl(var(--muted-foreground));">Exact edit logs are unavailable for this submission, so current values cannot be computed.</div>';
+
+  return `
+    <div style="max-width:280px;">
+      <div style="font-weight:600;">${title}</div>
+      <div style="margin-top:6px;font-size:12px;color:hsl(var(--muted-foreground));">
+        ${description}
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:hsl(var(--muted-foreground));">
+        Formula:
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:hsl(var(--foreground));">
+          ${formula}
+        </span>
+      </div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid hsl(var(--border));font-size:11px;line-height:1.5;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <span><strong>HA</strong>: Human-added words</span>
+          <span style="min-width:48px;text-align:right;font-variant-numeric:tabular-nums;color:hsl(var(--foreground));">${formatContributionCount(contributionMetrics.ha, contributionMetrics.isExact)}</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <span><strong>HD</strong>: Human-written words later deleted</span>
+          <span style="min-width:48px;text-align:right;font-variant-numeric:tabular-nums;color:hsl(var(--foreground));">${formatContributionCount(contributionMetrics.hd, contributionMetrics.isExact)}</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <span><strong>GP</strong>: Words pasted from ChatGPT</span>
+          <span style="min-width:48px;text-align:right;font-variant-numeric:tabular-nums;color:hsl(var(--foreground));">${formatContributionCount(contributionMetrics.gp, contributionMetrics.isExact)}</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <span><strong>GD</strong>: ChatGPT-origin words later deleted</span>
+          <span style="min-width:48px;text-align:right;font-variant-numeric:tabular-nums;color:hsl(var(--foreground));">${formatContributionCount(contributionMetrics.gd, contributionMetrics.isExact)}</span>
+        </div>
+      </div>
+      ${availabilityNote}
+    </div>
+  `.trim();
 };
 
 export default function ViewWrapper({
@@ -282,8 +355,18 @@ export default function ViewWrapper({
     };
   }, [recentUserInput]);
 
+  const contributionTooltipHtml = useMemo(() => ({
+    hcr: buildContributionMetricTooltipHtml('hcr', displayedContributionMetrics),
+    her: buildContributionMetricTooltipHtml('her', displayedContributionMetrics),
+  }), [displayedContributionMetrics]);
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
+      <Tooltip
+        id="summary-contribution-metric-tooltip"
+        place="top"
+        className="z-50 max-w-[320px] !bg-[hsl(var(--popover))] !text-[hsl(var(--popover-foreground))] !border !border-[hsl(var(--border))] !rounded-md shadow-md text-xs px-3 py-2"
+      />
       {/* Header */}
       <header className="sticky top-0 z-10 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))]/95 backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--background))]/60">
         <div className="container mx-auto px-4 py-4">
@@ -346,16 +429,21 @@ export default function ViewWrapper({
               <Type className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              <div className="grid grid-cols-3 divide-x divide-[hsl(var(--border))]">
+                <div className="pr-3">
+                  <div className="text-xl font-bold text-[hsl(var(--foreground))] lg:text-2xl">
+                    {displayedWordBreakdown.totalWords}
+                  </div>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">Total words</p>
+                </div>
+                <div className="px-3">
+                  <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 lg:text-2xl">
                     {displayedWordBreakdown.userWords}
                   </div>
                   <p className="text-xs text-[hsl(var(--muted-foreground))]">User written</p>
                 </div>
-                <div className="h-8 w-px bg-[hsl(var(--border))]" />
-                <div>
-                  <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                <div className="pl-3">
+                  <div className="text-xl font-bold text-amber-600 dark:text-amber-400 lg:text-2xl">
                     {displayedWordBreakdown.gptWords}
                   </div>
                   <p className="text-xs text-[hsl(var(--muted-foreground))]">GPT generated</p>
@@ -363,25 +451,37 @@ export default function ViewWrapper({
               </div>
               <div className="mt-3 border-t border-[hsl(var(--border))] pt-3 space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[hsl(var(--muted-foreground))]">Total words</span>
+                  <div className="flex items-center gap-1.5 text-[hsl(var(--muted-foreground))]">
+                    <span>Human Contribution Ratio</span>
+                    <button
+                      type="button"
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+                      aria-label="Explain Human Contribution Ratio"
+                      data-tooltip-id="summary-contribution-metric-tooltip"
+                      data-tooltip-html={contributionTooltipHtml.hcr}
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <span className="font-medium text-[hsl(var(--foreground))]">
-                    {displayedWordBreakdown.totalWords}
+                    {formatContributionPercentage(displayedContributionMetrics.hcr)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[hsl(var(--muted-foreground))]">HCR</span>
+                  <div className="flex items-center gap-1.5 text-[hsl(var(--muted-foreground))]">
+                    <span>Human Edit Ratio</span>
+                    <button
+                      type="button"
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+                      aria-label="Explain Human Edit Ratio"
+                      data-tooltip-id="summary-contribution-metric-tooltip"
+                      data-tooltip-html={contributionTooltipHtml.her}
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <span className="font-medium text-[hsl(var(--foreground))]">
-                    {displayedContributionMetrics.hcr === null
-                      ? 'N/A'
-                      : `${(displayedContributionMetrics.hcr * 100).toFixed(1)}%`}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[hsl(var(--muted-foreground))]">HER</span>
-                  <span className="font-medium text-[hsl(var(--foreground))]">
-                    {displayedContributionMetrics.her === null
-                      ? 'N/A'
-                      : `${(displayedContributionMetrics.her * 100).toFixed(1)}%`}
+                    {formatContributionPercentage(displayedContributionMetrics.her)}
                   </span>
                 </div>
                 {!displayedContributionMetrics.isExact && (

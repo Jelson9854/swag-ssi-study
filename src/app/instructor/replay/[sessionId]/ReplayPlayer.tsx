@@ -1945,12 +1945,13 @@ export default function ReplayPlayer({
     });
   }, []);
 
-  const breakGraphMarkerPositions = useMemo(() => {
+  const sessionBreakGraphMarkerPositions = useMemo(() => {
     if (compressedDuration <= 0) {
       return [];
     }
 
     return idlePeriods
+      .filter((idle) => !isSameCalendarDay(idle.start, idle.end))
       .map((idle) => {
         const markerTime = idle.start + (idle.edgeSeconds * 1000);
         const compressedMarkerTime = getCompressedTime(markerTime);
@@ -2702,13 +2703,13 @@ export default function ReplayPlayer({
                         </defs>
                         <XAxis dataKey="percentage" type="number" domain={[0, 100]} hide />
                         <YAxis domain={[0, maxWordCount]} hide />
-                        {breakGraphMarkerPositions.map((position, i) => (
+                        {sessionBreakGraphMarkerPositions.map((position, i) => (
                           <ReferenceLine
-                            key={`break-word-marker-${i}`}
+                            key={`session-break-word-marker-${i}`}
                             x={position}
-                            stroke="#111827"
+                            stroke="#3b82f6"
                             strokeWidth={1.1}
-                            strokeOpacity={0.85}
+                            strokeOpacity={0.75}
                             strokeDasharray="2 2"
                           />
                         ))}
