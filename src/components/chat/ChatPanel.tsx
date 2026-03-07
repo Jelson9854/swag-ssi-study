@@ -377,8 +377,8 @@ function ChatPanel({
       {/* Chat panel - always rendered for smooth animation */}
       <div className="flex flex-col h-full bg-[hsl(var(--background))]">
         {/* Header with New Conversation and Close buttons */}
-        <div className="border-b border-[hsl(var(--border))] px-4 py-3 flex items-center justify-between bg-[hsl(var(--card))]">
-          <h3 className="font-semibold text-[hsl(var(--foreground))]">AI Assistant</h3>
+        <div className="flex h-10 items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4">
+          <h3 className="font-semibold text-[hsl(var(--foreground))]">Chat</h3>
           <div className="flex items-center gap-2">
             {/* New conversation button - only show in live mode */}
             {!isReplayMode && (

@@ -11,7 +11,6 @@ import {
   AreaChart,
   ReferenceLine,
   ResponsiveContainer,
-  Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from 'recharts';
@@ -110,6 +109,11 @@ interface WordCountGraphPoint {
   gptSharePct: number;
   time: number;
   timeFormatted: string;
+}
+
+interface HoveredWordCountPoint extends WordCountGraphPoint {
+  viewportX: number;
+  graphTop: number;
 }
 
 interface TypingOpEventData {
@@ -566,6 +570,7 @@ const normalizeForMatching = (value: string): string => {
 
 type PasteSourceArea = 'chat' | 'editor' | 'instruction' | 'external' | 'unknown';
 type PasteTargetArea = 'editor' | 'chat';
+type ReplayPasteVariant = 'chat_to_editor' | 'internal_other' | 'external';
 
 const normalizePasteSourceArea = (sourceArea: unknown, eventType: string): PasteSourceArea => {
   if (
@@ -599,6 +604,36 @@ const getPasteRouteLabel = (event: EditorEvent): string => {
   return `${pasteAreaLabel(sourceArea)} -> ${pasteAreaLabel(targetArea)}`;
 };
 
+const getReplayPasteVariant = (event: EditorEvent): ReplayPasteVariant => {
+  if (event.eventType === 'paste_external') {
+    return 'external';
+  }
+
+  const eventData = (event.eventData || {}) as { sourceArea?: unknown; targetArea?: unknown };
+  const sourceArea = normalizePasteSourceArea(eventData.sourceArea, event.eventType);
+  const targetArea = normalizePasteTargetArea(eventData.targetArea);
+
+  if (sourceArea === 'chat' && targetArea === 'editor') {
+    return 'chat_to_editor';
+  }
+
+  return 'internal_other';
+};
+
+const getReplayPasteLabel = (event: EditorEvent): string => {
+  const variant = getReplayPasteVariant(event);
+
+  if (variant === 'external') {
+    return 'External Paste';
+  }
+
+  if (variant === 'chat_to_editor') {
+    return 'Chat -> Editor Paste';
+  }
+
+  return 'Other Internal Paste';
+};
+
 const formatClockDuration = (totalSeconds: number): string => {
   const safeSeconds = Math.max(0, totalSeconds);
   const hours = Math.floor(safeSeconds / 3600);
@@ -630,6 +665,28 @@ const formatBreakDuration = (totalSeconds: number): string => {
   }
 
   return `${minutes}m ${seconds}s`;
+};
+
+const isSameCalendarDay = (leftTimestamp: number, rightTimestamp: number): boolean => (
+  new Date(leftTimestamp).toDateString() === new Date(rightTimestamp).toDateString()
+);
+
+const formatSessionRange = (startTimestamp: number, endTimestamp: number): string => {
+  const startDate = new Date(startTimestamp);
+  const endDate = new Date(endTimestamp);
+  const sharedOptions: Intl.DateTimeFormatOptions = {
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+
+  const startLabel = startDate.toLocaleString([], sharedOptions);
+  const endLabel = isSameCalendarDay(startTimestamp, endTimestamp)
+    ? endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : endDate.toLocaleString([], sharedOptions);
+
+  return `${startLabel} - ${endLabel}`;
 };
 
 const REPLAY_AUTHORSHIP_HIGHLIGHT_STORAGE_KEY = 'swag:replay:authorship-highlight';
@@ -670,6 +727,8 @@ export default function ReplayPlayer({
   const [showAuthorshipHighlight, setShowAuthorshipHighlight] = useState(false);
   const [stepReplayFailureCount, setStepReplayFailureCount] = useState(0);
   const [lastStepReplayFailure, setLastStepReplayFailure] = useState<string | null>(null);
+  const [hoveredWordCountPoint, setHoveredWordCountPoint] = useState<HoveredWordCountPoint | null>(null);
+  const [mainTimelineWidth, setMainTimelineWidth] = useState(0);
   const prevVisibleMessagesCountRef = useRef<number>(0);
   const prevVisibleReplayPasteHighlightCountRef = useRef<number>(0);
   const lastAppliedTypingSnapshotKeyRef = useRef<string>('init');
@@ -682,6 +741,7 @@ export default function ReplayPlayer({
   const lastAppliedAuthorshipOverlayKeyRef = useRef<string>('init');
   const loggedStepFailureSeqsRef = useRef<Set<number>>(new Set());
   const shortcutsDialogRef = useRef<HTMLDialogElement>(null);
+  const mainTimelineRef = useRef<HTMLDivElement>(null);
   const totalWordCountGradientId = useId();
   const gptWordCountGradientId = useId();
   const replayShortcutsDialogTitleId = useId();
@@ -703,6 +763,31 @@ export default function ReplayPlayer({
 
   const closeShortcutsDialog = useCallback(() => {
     shortcutsDialogRef.current?.close();
+  }, []);
+
+  useEffect(() => {
+    const element = mainTimelineRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateWidth = () => {
+      setMainTimelineWidth(element.getBoundingClientRect().width);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+
+    const observer = new ResizeObserver(() => updateWidth());
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
   }, []);
 
   // Create BlockNote editor for replay
@@ -1791,6 +1876,42 @@ export default function ReplayPlayer({
     return dedupedByPercentage;
   }, [compressedDuration, formatReplayTime, getCompressedTime, startTime, wordCountTimeline]);
 
+  const handleWordCountGraphMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (compressedDuration <= 0 || wordCountTimeline.length === 0) {
+      setHoveredWordCountPoint(null);
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    const hoveredCompressedTime = startTime + (percentage / 100) * compressedDuration;
+    const hoveredRealTime = Math.max(startTime, Math.min(endTime, getRealTime(hoveredCompressedTime)));
+    const entryIndex = findLastEventIndexAtOrBefore(wordCountTimeline, hoveredRealTime);
+    const entry = wordCountTimeline[Math.max(0, entryIndex)] ?? wordCountTimeline[0];
+
+    if (!entry) {
+      setHoveredWordCountPoint(null);
+      return;
+    }
+
+    setHoveredWordCountPoint({
+      percentage,
+      wordCount: entry.wordCount,
+      userWordCount: entry.userWordCount,
+      gptWordCount: entry.gptWordCount,
+      gptSharePct: entry.wordCount > 0 ? (entry.gptWordCount / entry.wordCount) * 100 : 0,
+      time: hoveredRealTime,
+      timeFormatted: formatReplayTime(hoveredRealTime),
+      viewportX: e.clientX,
+      graphTop: rect.top,
+    });
+  }, [compressedDuration, endTime, formatReplayTime, getRealTime, startTime, wordCountTimeline]);
+
+  const handleWordCountGraphMouseLeave = useCallback(() => {
+    setHoveredWordCountPoint(null);
+  }, []);
+
   const maxWordCount = useMemo(() => {
     if (wordCountGraphData.length === 0) return 1;
     return Math.max(...wordCountGraphData.map((point) => point.wordCount), 1);
@@ -1838,6 +1959,64 @@ export default function ReplayPlayer({
       })
       .filter((position) => Number.isFinite(position));
   }, [compressedDuration, getCompressedTime, idlePeriods, startTime]);
+
+  const replaySessions = useMemo(() => {
+    if (startTime > endTime) {
+      return [];
+    }
+
+    const sessions: Array<{ startTime: number; endTime: number }> = [];
+    let currentStart = startTime;
+
+    idlePeriods.forEach((idle) => {
+      if (isSameCalendarDay(idle.start, idle.end)) {
+        return;
+      }
+
+      sessions.push({
+        startTime: currentStart,
+        endTime: idle.start,
+      });
+      currentStart = idle.end;
+    });
+
+    sessions.push({
+      startTime: currentStart,
+      endTime,
+    });
+
+    return sessions.filter((session) => session.endTime >= session.startTime);
+  }, [endTime, idlePeriods, startTime]);
+
+  const replaySessionGraphLabels = useMemo(() => {
+    if (compressedDuration <= 0) {
+      return [];
+    }
+
+    return replaySessions.map((session, index) => {
+      const compressedStart = getCompressedTime(session.startTime);
+      const compressedEnd = getCompressedTime(session.endTime);
+      const startPosition = ((compressedStart - startTime) / compressedDuration) * 100;
+      const endPosition = ((compressedEnd - startTime) / compressedDuration) * 100;
+      const clampedStart = Math.max(0, Math.min(100, startPosition));
+      const clampedEnd = Math.max(clampedStart, Math.min(100, endPosition));
+      const width = Math.max(clampedEnd - clampedStart, 1);
+      const title = `Session ${index + 1}`;
+      const rangeLabel = formatSessionRange(session.startTime, session.endTime);
+
+      return {
+        id: `replay-session-${index}`,
+        title,
+        rangeLabel,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        position: clampedStart,
+        width,
+        compactLabel: title,
+        fullLabel: `${title} (${rangeLabel})`,
+      };
+    });
+  }, [compressedDuration, getCompressedTime, replaySessions, startTime]);
 
   const replayPasteHighlights = useMemo<ReplayPasteHighlight[]>(() => {
     const searchableMessages = chatMessages.map((message) => ({
@@ -1911,39 +2090,10 @@ export default function ReplayPlayer({
     setVisibleReplayPasteHighlights(replayPasteHighlights.slice(0, visibleCount));
   }, [replayPasteHighlights, currentTime]);
 
-  const renderWordCountTooltip = useCallback(
-    ({
-      active,
-      payload,
-    }: {
-      active?: boolean;
-      payload?: ReadonlyArray<{ payload: WordCountGraphPoint }>;
-    }) => {
-      if (!active || !payload || payload.length === 0) return null;
-      const point = payload[0].payload;
-
-      return (
-        <div className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-2 py-1.5 shadow-md">
-          <div className="text-xs font-semibold text-[hsl(var(--popover-foreground))]">
-            {point.wordCount} words (total)
-          </div>
-          <div className="text-[11px] text-emerald-700">User: {point.userWordCount}</div>
-          <div className="text-[11px] text-amber-700">GPT: {point.gptWordCount}</div>
-          <div className="text-[11px] text-amber-700/90">
-            GPT share: {point.gptSharePct.toFixed(1)}%
-          </div>
-          <div className="text-xs text-[hsl(var(--muted-foreground))]">
-            at {point.timeFormatted}
-          </div>
-        </div>
-      );
-    },
-    []
-  );
-
   const majorReplayEvents = useMemo(() => {
     const items: Array<{
       type: 'chat' | 'paste_internal' | 'paste_external' | 'submission';
+      variant?: ReplayPasteVariant;
       label: string;
       detail: string | null;
       timestamp: number;
@@ -1963,7 +2113,8 @@ export default function ReplayPlayer({
       if (event.eventType === 'paste_internal' || event.eventType === 'paste_external') {
         items.push({
           type: event.eventType,
-          label: event.eventType === 'paste_external' ? 'External Paste' : 'Content Pasted',
+          variant: getReplayPasteVariant(event),
+          label: getReplayPasteLabel(event),
           detail: getPasteRouteLabel(event),
           timestamp: event.timestamp,
         });
@@ -2003,6 +2154,7 @@ export default function ReplayPlayer({
       id: string;
       position: number;
       type: string;
+      variant?: ReplayPasteVariant;
       label: string;
       content: string;
       time: string;
@@ -2041,7 +2193,8 @@ export default function ReplayPlayer({
           id: `paste-${i}`,
           position,
           type: event.eventType,
-          label: event.eventType === 'paste_external' ? 'External Paste' : 'Internal Paste',
+          variant: getReplayPasteVariant(event),
+          label: getReplayPasteLabel(event),
           content: pasteContent.length > 100 ? pasteContent.slice(0, 100) + '...' : pasteContent,
           time: formatReplayTime(event.timestamp),
           route,
@@ -2067,7 +2220,140 @@ export default function ReplayPlayer({
     return timelineMarkers;
   }, [chatMessages, compressedDuration, events, formatReplayTime, getCompressedTime, startTime]);
 
-  // Get typing sessions from editor writing events only (exclude chat-only activity)
+  const markerClusters = useMemo(() => {
+    const nonSubmissionMarkers = markers
+      .filter((marker) => marker.type !== 'submission')
+      .slice()
+      .sort((a, b) => a.position - b.position);
+
+    if (nonSubmissionMarkers.length === 0) {
+      return [];
+    }
+
+    const getPriority = (marker: typeof nonSubmissionMarkers[number]) => {
+      if (marker.type === 'paste_external') return 0;
+      if (marker.variant === 'chat_to_editor') return 1;
+      if (marker.type === 'paste_internal') return 2;
+      return 3;
+    };
+
+    const getTooltipTone = (marker: typeof nonSubmissionMarkers[number]) => {
+      if (marker.type === 'paste_external') {
+        return {
+          textClass: 'text-rose-300',
+          dotClass: 'bg-rose-500',
+        };
+      }
+
+      if (marker.variant === 'chat_to_editor') {
+        return {
+          textClass: 'text-amber-300',
+          dotClass: 'bg-amber-500',
+        };
+      }
+
+      if (marker.type === 'paste_internal') {
+        return {
+          textClass: 'text-emerald-300',
+          dotClass: 'bg-emerald-400',
+        };
+      }
+
+      return {
+        textClass: 'text-violet-300',
+        dotClass: 'bg-violet-500',
+      };
+    };
+
+    const buildSingleTooltipHtml = (marker: typeof nonSubmissionMarkers[number]) => {
+      const tone = getTooltipTone(marker);
+      return `<div style="max-width: 250px;"><div class="font-semibold ${tone.textClass}">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.route ? `<div class="text-xs text-gray-300 mt-1">${marker.route}</div>` : ''}${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''}</div>`;
+    };
+
+    const buildClusterTooltipHtml = (clusterMarkers: typeof nonSubmissionMarkers) => {
+      if (clusterMarkers.length === 1) {
+        return buildSingleTooltipHtml(clusterMarkers[0]);
+      }
+
+      const itemsHtml = clusterMarkers
+        .slice()
+        .sort((left, right) => {
+          const priorityDiff = getPriority(left) - getPriority(right);
+          if (priorityDiff !== 0) return priorityDiff;
+          return left.position - right.position;
+        })
+        .map((marker, index) => {
+          const tone = getTooltipTone(marker);
+          return `<div class="${index > 0 ? 'mt-2 border-t border-white/10 pt-2' : 'mt-1'}"><div class="flex items-center gap-2"><span class="inline-block h-2 w-2 rounded-full ${tone.dotClass}"></span><span class="font-semibold ${tone.textClass}">${marker.label}</span><span class="ml-auto text-[11px] text-gray-400">${marker.time}</span></div>${marker.route ? `<div class="ml-4 mt-1 text-[11px] text-gray-300">${marker.route}</div>` : ''}</div>`;
+        })
+        .join('');
+
+      return `<div style="max-width: 280px;"><div class="font-semibold text-gray-100">${clusterMarkers.length} overlapping events</div>${itemsHtml}</div>`;
+    };
+
+    const clusters: Array<{
+      id: string;
+      position: number;
+      width: string;
+      tooltipHtml: string;
+    }> = [];
+    const clusterThresholdPx = 8;
+    const hoverPaddingPx = 8;
+    let currentCluster: typeof nonSubmissionMarkers = [];
+    let currentMaxPx = -Infinity;
+
+    const flushCluster = () => {
+      if (currentCluster.length === 0) {
+        return;
+      }
+
+      const positionsPx = currentCluster.map((marker) =>
+        mainTimelineWidth > 0 ? (marker.position / 100) * mainTimelineWidth : marker.position * 10
+      );
+      const minPx = Math.min(...positionsPx);
+      const maxPx = Math.max(...positionsPx);
+      const centerPx = (minPx + maxPx) / 2;
+      const centerPosition = mainTimelineWidth > 0
+        ? (centerPx / mainTimelineWidth) * 100
+        : currentCluster.reduce((sum, marker) => sum + marker.position, 0) / currentCluster.length;
+      const widthPx = Math.max(10, maxPx - minPx + hoverPaddingPx);
+
+      clusters.push({
+        id: `marker-cluster-${clusters.length}`,
+        position: centerPosition,
+        width: `${widthPx}px`,
+        tooltipHtml: buildClusterTooltipHtml(currentCluster),
+      });
+
+      currentCluster = [];
+      currentMaxPx = -Infinity;
+    };
+
+    nonSubmissionMarkers.forEach((marker) => {
+      const markerPx = mainTimelineWidth > 0 ? (marker.position / 100) * mainTimelineWidth : marker.position * 10;
+
+      if (currentCluster.length === 0) {
+        currentCluster = [marker];
+        currentMaxPx = markerPx;
+        return;
+      }
+
+      if (markerPx - currentMaxPx <= clusterThresholdPx) {
+        currentCluster.push(marker);
+        currentMaxPx = markerPx;
+        return;
+      }
+
+      flushCluster();
+      currentCluster = [marker];
+      currentMaxPx = markerPx;
+    });
+
+    flushCluster();
+    return clusters;
+  }, [mainTimelineWidth, markers]);
+
+  // Get typing segments from editor writing events only (exclude chat-only activity)
   const typingSessions = useMemo(() => {
     const writingEventTimes: number[] = [];
 
@@ -2087,7 +2373,7 @@ export default function ReplayPlayer({
     writingEventTimes.sort((a, b) => a - b);
 
     const sessions: Array<{ startTime: number; endTime: number }> = [];
-    const GAP_THRESHOLD = 10 * 1000; // keep same typing session only within 10 seconds
+    const GAP_THRESHOLD = 10 * 1000; // keep same typing segment only within 10 seconds
 
     if (writingEventTimes.length === 0) return sessions;
 
@@ -2119,17 +2405,18 @@ export default function ReplayPlayer({
     const navEvents: Array<{
       time: number;
       type: 'typing_start' | 'chat' | 'paste_internal' | 'paste_external' | 'submission';
+      variant?: ReplayPasteVariant;
       label: string;
       description: string;
     }> = [];
 
-    // Typing session starts
+    // Typing segment starts
     typingSessions.forEach((session, i) => {
       navEvents.push({
         time: session.startTime,
         type: 'typing_start',
-        label: `Typing Session ${i + 1}`,
-        description: `Started at ${formatReplayTime(session.startTime)}`,
+        label: `Typing Segment ${i + 1}`,
+        description: `${formatReplayTime(session.startTime)} - ${formatReplayTime(session.endTime)}`,
       });
     });
 
@@ -2150,10 +2437,12 @@ export default function ReplayPlayer({
       .filter(e => e.eventType === 'paste_internal' || e.eventType === 'paste_external')
       .forEach((event, i) => {
         const routeLabel = getPasteRouteLabel(event);
+        const pasteLabel = getReplayPasteLabel(event);
         navEvents.push({
           time: event.timestamp,
           type: event.eventType as 'paste_internal' | 'paste_external',
-          label: event.eventType === 'paste_external' ? `External Paste ${i + 1}` : `Internal Paste ${i + 1}`,
+          variant: getReplayPasteVariant(event),
+          label: `${pasteLabel} ${i + 1}`,
           description: `${routeLabel} at ${formatReplayTime(event.timestamp)}`,
         });
       });
@@ -2264,8 +2553,40 @@ export default function ReplayPlayer({
     [visibleMessages]
   );
 
+  const hoveredWordCountTooltipLeft = hoveredWordCountPoint
+    ? Math.max(
+        120,
+        Math.min(
+          (typeof window !== 'undefined' ? window.innerWidth : hoveredWordCountPoint.viewportX) - 120,
+          hoveredWordCountPoint.viewportX
+        )
+      )
+    : 0;
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
+      {hoveredWordCountPoint && (
+        <div
+          className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--popover))] px-2 py-1.5 shadow-md"
+          style={{
+            left: hoveredWordCountTooltipLeft,
+            top: hoveredWordCountPoint.graphTop + 24,
+          }}
+        >
+          <div className="text-xs font-semibold text-[hsl(var(--popover-foreground))]">
+            {hoveredWordCountPoint.wordCount} words (total)
+          </div>
+          <div className="text-[11px] text-emerald-700">User: {hoveredWordCountPoint.userWordCount}</div>
+          <div className="text-[11px] text-amber-700">GPT: {hoveredWordCountPoint.gptWordCount}</div>
+          <div className="text-[11px] text-amber-700/90">
+            GPT share: {hoveredWordCountPoint.gptSharePct.toFixed(1)}%
+          </div>
+          <div className="text-xs text-[hsl(var(--muted-foreground))]">
+            at {hoveredWordCountPoint.timeFormatted}
+          </div>
+        </div>
+      )}
+
       {/* Timeline Controls */}
       <div className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] px-6 py-4">
         <div className={`flex gap-4 ${isWordCountGraphExpanded ? 'items-end' : 'items-center'}`}>
@@ -2307,13 +2628,15 @@ export default function ReplayPlayer({
             {/* Word Count Graph */}
             {hasWordCountData && (
               <div
-                className={`overflow-hidden transition-all duration-300 ${
-                  isWordCountGraphExpanded ? 'h-32' : 'h-0'
+                className={`transition-all duration-300 ${
+                  isWordCountGraphExpanded ? 'h-36 overflow-visible' : 'h-0 overflow-hidden'
                 }`}
               >
                 <div
-                  className="h-32 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] cursor-pointer outline-none focus:outline-none flex flex-col"
+                  className="h-36 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] cursor-pointer outline-none focus:outline-none flex flex-col"
                   onClick={handleWordCountGraphClick}
+                  onMouseMove={handleWordCountGraphMouseMove}
+                  onMouseLeave={handleWordCountGraphMouseLeave}
                   tabIndex={-1}
                 >
                   <div className="px-2 pt-1 text-[10px] text-[hsl(var(--muted-foreground))] flex items-center gap-3">
@@ -2326,11 +2649,45 @@ export default function ReplayPlayer({
                       GPT
                     </span>
                   </div>
-                  <div className="h-[calc(100%-18px)] pl-0.5 py-0.5">
+                  <div className="relative h-[calc(100%-18px)] pl-0.5 py-0.5">
+                    {hoveredWordCountPoint && (
+                      <div
+                        className="pointer-events-none absolute inset-y-1 z-10 w-px bg-slate-400/70"
+                        style={{ left: `${hoveredWordCountPoint.percentage}%` }}
+                      />
+                    )}
+                    <div className="pointer-events-none absolute inset-x-1 top-1 z-10 h-5">
+                      {replaySessionGraphLabels.map((sessionLabel) => {
+                        const isActiveSession =
+                          currentTime >= sessionLabel.startTime &&
+                          currentTime <= sessionLabel.endTime;
+
+                        return (
+                          <div
+                            key={sessionLabel.id}
+                            className={`pointer-events-auto absolute top-0 flex h-5 items-center overflow-hidden rounded-sm border px-1.5 text-[9px] font-semibold shadow-sm transition-colors ${
+                              isActiveSession
+                                ? 'border-blue-200/90 bg-blue-50/90 text-blue-700'
+                                : 'border-slate-300/80 bg-white/85 text-slate-700'
+                            }`}
+                            style={{
+                              left: `${sessionLabel.position}%`,
+                              width: `${sessionLabel.width}%`,
+                            }}
+                            data-tooltip-id="timeline-tooltip"
+                            data-tooltip-html={`<div class="text-center"><div class="font-semibold">${sessionLabel.title}</div><div class="text-xs text-gray-300 mt-1">${sessionLabel.rangeLabel}</div></div>`}
+                          >
+                            <span className="truncate">
+                              {sessionLabel.width < 18 ? sessionLabel.compactLabel : sessionLabel.fullLabel}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart
                         data={wordCountGraphData}
-                        margin={{ top: 2, right: 4, left: 0, bottom: 0 }}
+                        margin={{ top: 24, right: 4, left: 0, bottom: 0 }}
                         style={{ outline: 'none' }}
                       >
                         <defs>
@@ -2345,10 +2702,6 @@ export default function ReplayPlayer({
                         </defs>
                         <XAxis dataKey="percentage" type="number" domain={[0, 100]} hide />
                         <YAxis domain={[0, maxWordCount]} hide />
-                        <RechartsTooltip
-                          content={renderWordCountTooltip}
-                          cursor={{ stroke: '#9ca3af', strokeWidth: 1, strokeDasharray: '3 3' }}
-                        />
                         {breakGraphMarkerPositions.map((position, i) => (
                           <ReferenceLine
                             key={`break-word-marker-${i}`}
@@ -2371,6 +2724,7 @@ export default function ReplayPlayer({
                           stroke="#2563eb"
                           strokeWidth={1.7}
                           fill={`url(#${totalWordCountGradientId})`}
+                          activeDot={false}
                           isAnimationActive={false}
                         />
                         <Area
@@ -2379,6 +2733,7 @@ export default function ReplayPlayer({
                           stroke="#f59e0b"
                           strokeWidth={1.7}
                           fill={`url(#${gptWordCountGradientId})`}
+                          activeDot={false}
                           isAnimationActive={false}
                         />
                       </AreaChart>
@@ -2404,14 +2759,14 @@ export default function ReplayPlayer({
 
                 return (
                   <div
-                    key={`session-${i}`}
+                    key={`typing-segment-${i}`}
                     className="absolute top-0 h-full bg-blue-500/80 rounded cursor-pointer hover:bg-blue-500 transition-colors"
                     style={{
                       left: `${startPos}%`,
                       width: `${Math.max(width, 0.5)}%`,
                     }}
                     data-tooltip-id="timeline-tooltip"
-                    data-tooltip-html={`<div class="text-center"><div class="font-semibold">Typing Session ${i + 1}</div><div class="text-xs text-gray-300 mt-1">${formatReplayTime(session.startTime)} - ${formatReplayTime(session.endTime)}</div><div class="text-xs text-gray-400">Duration: ${replayDurationLabel}</div></div>`}
+                    data-tooltip-html={`<div class="text-center"><div class="font-semibold">Typing Segment ${i + 1}</div><div class="text-xs text-gray-300 mt-1">${formatReplayTime(session.startTime)} - ${formatReplayTime(session.endTime)}</div><div class="text-xs text-gray-400">Duration: ${replayDurationLabel}</div></div>`}
                   />
                 );
               })}
@@ -2444,34 +2799,76 @@ export default function ReplayPlayer({
 
             {/* Main Timeline (Bottom) */}
             <div
-              className="h-4 bg-[hsl(var(--input))] rounded cursor-pointer relative group"
+              ref={mainTimelineRef}
+              className="h-4 mb-2 rounded border border-slate-200/80 bg-slate-100 cursor-pointer relative group"
               onClick={handleTimelineClick}
             >
               {/* Progress bar */}
               <div
-                className="absolute top-0 left-0 h-full bg-[hsl(var(--primary))] rounded-l"
+                className="absolute top-0 left-0 h-full bg-slate-300 rounded-l"
                 style={{ width: `${clampedProgress}%` }}
               />
 
               {/* Event markers */}
-              {markers.map((marker) => (
-                <div
-                  key={marker.id}
-                  className={`absolute top-0 w-1.5 h-full cursor-pointer hover:w-2 transition-all z-10 ${marker.type === 'paste_external'
-                    ? 'bg-red-500'
+              {markers.map((marker) => {
+                const markerColorClass = marker.type === 'paste_external'
+                  ? 'bg-rose-500'
+                  : marker.variant === 'chat_to_editor'
+                    ? 'bg-amber-500'
                     : marker.type === 'paste_internal'
-                      ? 'bg-emerald-500'
+                      ? 'bg-emerald-400/80'
+                      : 'bg-violet-500';
+                const tooltipColorClass = marker.type === 'paste_external'
+                  ? 'text-rose-300'
+                  : marker.variant === 'chat_to_editor'
+                    ? 'text-amber-300'
+                    : marker.type === 'paste_internal'
+                      ? 'text-emerald-300'
                       : marker.type === 'submission'
-                        ? 'bg-blue-600'
-                        : 'bg-purple-500'
-                    }`}
-                  style={{ left: `${marker.position}%` }}
+                        ? 'text-blue-300'
+                        : 'text-violet-300';
+                const tooltipHtml = `<div style="max-width: 250px;"><div class="font-semibold ${tooltipColorClass}">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.route ? `<div class="text-xs text-gray-300 mt-1">${marker.route}</div>` : ''}${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''
+                  }</div>`;
+
+                if (marker.type === 'submission') {
+                  return (
+                    <div
+                      key={marker.id}
+                      className="absolute top-full mt-0.5 -translate-x-1/2 cursor-pointer z-10"
+                      style={{ left: `${marker.position}%` }}
+                      data-tooltip-id="timeline-tooltip"
+                      data-tooltip-html={tooltipHtml}
+                    >
+                      <div className="h-0 w-0 border-x-[6px] border-x-transparent border-b-[9px] border-b-blue-600 drop-shadow-[0_1px_1px_rgba(37,99,235,0.35)] transition-transform hover:scale-110" />
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={marker.id}
+                    className={`absolute top-0 w-1.5 h-full cursor-pointer hover:w-2 transition-all z-10 ${markerColorClass}`}
+                    style={{ left: `${marker.position}%` }}
+                    {...(marker.type === 'submission'
+                      ? {
+                          'data-tooltip-id': 'timeline-tooltip',
+                          'data-tooltip-html': tooltipHtml,
+                        }
+                      : {})}
+                  />
+                );
+              })}
+
+              {markerClusters.map((cluster) => (
+                <div
+                  key={cluster.id}
+                  className="absolute top-0 h-full -translate-x-1/2 z-20"
+                  style={{
+                    left: `${cluster.position}%`,
+                    width: cluster.width,
+                  }}
                   data-tooltip-id="timeline-tooltip"
-                  data-tooltip-html={`<div style="max-width: 250px;"><div class="font-semibold ${marker.type === 'paste_external' ? 'text-red-300' :
-                    marker.type === 'paste_internal' ? 'text-green-300' :
-                      marker.type === 'submission' ? 'text-blue-300' : 'text-purple-300'
-                    }">${marker.label}</div><div class="text-xs text-gray-300 mt-1">at ${marker.time}</div>${marker.route ? `<div class="text-xs text-gray-300 mt-1">${marker.route}</div>` : ''}${marker.content ? `<div class="text-xs text-gray-200 mt-2 whitespace-pre-wrap">${marker.content}</div>` : ''
-                    }</div>`}
+                  data-tooltip-html={cluster.tooltipHtml}
                 />
               ))}
 
@@ -2528,19 +2925,23 @@ export default function ReplayPlayer({
               <span>Typing Activity</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-purple-500 rounded" />
+              <div className="w-3 h-3 bg-violet-500 rounded" />
               <span>Chat</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-emerald-500 rounded" />
-              <span>Internal Paste</span>
+              <div className="w-3 h-3 bg-amber-500 rounded" />
+              <span>Chat {'->'} Editor Paste</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-red-500 rounded" />
+              <div className="w-3 h-3 bg-emerald-400/80 rounded" />
+              <span>Other Internal Paste</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-rose-500 rounded" />
               <span>External Paste</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-3 h-3 bg-blue-600 rounded" />
+              <div className="h-0 w-0 border-x-[5px] border-x-transparent border-b-[8px] border-b-blue-600" />
               <span>Submission</span>
             </div>
             {idlePeriods.length > 0 && (
@@ -2608,12 +3009,17 @@ export default function ReplayPlayer({
                     {navigableEvents.map((event, i) => {
                       const isPast = event.time <= currentTime;
 
-                      const getEventIcon = (type: string) => {
+                      const getEventIcon = (type: string, variant?: ReplayPasteVariant) => {
                         switch (type) {
                           case 'typing_start': return <Keyboard className="w-4 h-4 text-blue-500" />;
-                          case 'chat': return <MessageSquare className="w-4 h-4 text-purple-500" />;
-                          case 'paste_internal': return <ClipboardCopy className="w-4 h-4 text-emerald-500" />;
-                          case 'paste_external': return <AlertTriangle className="w-4 h-4 text-destructive" />;
+                          case 'chat': return <MessageSquare className="w-4 h-4 text-violet-500" />;
+                          case 'paste_internal':
+                            return (
+                              <ClipboardCopy
+                                className={`w-4 h-4 ${variant === 'chat_to_editor' ? 'text-amber-500' : 'text-emerald-500'}`}
+                              />
+                            );
+                          case 'paste_external': return <AlertTriangle className="w-4 h-4 text-rose-500" />;
                           case 'submission': return <Send className="w-4 h-4 text-blue-600" />;
                           default: return null;
                         }
@@ -2630,7 +3036,7 @@ export default function ReplayPlayer({
                             >
                               <div className="flex items-start gap-3">
                                 <span className="mt-0.5 p-1 bg-[hsl(var(--muted))] rounded-md">
-                                  {getEventIcon(event.type)}
+                                  {getEventIcon(event.type, event.variant)}
                                 </span>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center justify-between gap-2">
@@ -2665,7 +3071,7 @@ export default function ReplayPlayer({
       <div className="flex-1 flex overflow-hidden">
         {/* Editor View (Left) */}
         <div className="flex-1 flex flex-col border-r border-gray-200">
-          <div className="px-4 py-2 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3">
+          <div className="h-10 px-4 bg-gray-100 border-b border-gray-200 flex items-center justify-between gap-3">
             <h2 className="font-semibold text-gray-900">Editor</h2>
             <label className="flex items-center gap-2 text-xs text-gray-700 select-none cursor-pointer">
               <input
@@ -2695,11 +3101,13 @@ export default function ReplayPlayer({
               <div
                 className={`absolute top-4 right-4 z-10 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium shadow-md ${
                   currentEvent.type === 'paste_external'
-                    ? 'bg-red-100 text-red-700 border border-red-200'
+                    ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                    : currentEvent.variant === 'chat_to_editor'
+                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
                     : currentEvent.type === 'chat'
-                      ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                      ? 'bg-violet-100 text-violet-700 border border-violet-200'
                     : currentEvent.type === 'paste_internal'
-                      ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                       : 'bg-blue-100 text-blue-700 border border-blue-200'
                 }`}
               >
@@ -2761,7 +3169,7 @@ export default function ReplayPlayer({
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
               </svg>
-              <span className="text-xs font-medium">AI</span>
+              <span className="text-xs font-medium">Chat</span>
             </button>
           </div>
         )}

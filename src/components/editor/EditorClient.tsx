@@ -342,7 +342,7 @@ export default function EditorClient({
               className="rounded-r-none rounded-l-lg shadow-lg h-auto py-4 pl-3 pr-4"
             >
               <Bot className="w-5 h-5 mr-2" />
-              <span className="text-xs font-medium">AI Helper</span>
+              <span className="text-xs font-medium">Chat</span>
             </Button>
           </div>
         )}
