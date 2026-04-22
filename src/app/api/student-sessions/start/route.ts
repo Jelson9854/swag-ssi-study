@@ -5,6 +5,7 @@ import { assignments, instructors, studentSessions } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import crypto from 'crypto';
+import { generateNextParticipantToken } from '@/lib/participant-token';
 
 const startSchema = z.object({
   assignmentId: z.string().uuid().optional(),
@@ -54,10 +55,12 @@ export async function POST(request: Request) {
 
     if (!sessionId) {
       sessionId = crypto.randomUUID();
+      const participantToken = await generateNextParticipantToken(assignment.id);
       await db.insert(studentSessions).values({
         id: sessionId,
         assignmentId: assignment.id,
         userId: user.id,
+        participantToken,
         studentFirstName: user.firstName || '',
         studentLastName: user.lastName || user.email,
         studentEmail: user.email,

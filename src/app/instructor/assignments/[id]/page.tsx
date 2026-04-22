@@ -33,15 +33,13 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
     db
       .select({
         id: studentSessions.id,
-        studentFirstName: studentSessions.studentFirstName,
-        studentLastName: studentSessions.studentLastName,
-        studentEmail: studentSessions.studentEmail,
+        participantToken: studentSessions.participantToken,
         startedAt: studentSessions.startedAt,
         lastSavedAt: studentSessions.lastSavedAt,
       })
       .from(studentSessions)
       .where(eq(studentSessions.assignmentId, id))
-      .orderBy(studentSessions.studentLastName, studentSessions.studentFirstName),
+      .orderBy(studentSessions.participantToken),
   ]);
 
   if (!assignment) {

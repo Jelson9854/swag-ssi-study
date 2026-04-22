@@ -48,6 +48,7 @@ export const studentSessions = pgTable('student_sessions', {
   id: text('id').primaryKey(),
   assignmentId: text('assignment_id').notNull().references(() => assignments.id),
   userId: text('user_id').references(() => instructors.id),
+  participantToken: text('participant_token').notNull().default(''),
   studentFirstName: text('student_first_name').notNull(),
   studentLastName: text('student_last_name').notNull(),
   studentEmail: text('student_email').notNull(),

@@ -22,9 +22,7 @@ import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, PlayCir
 
 interface StudentWithStats {
   id: string;
-  studentFirstName: string;
-  studentLastName: string;
-  studentEmail: string;
+  participantToken: string;
   startedAt: Date;
   lastSavedAt: Date | null;
   stats: {
@@ -43,30 +41,22 @@ const columnHelper = createColumnHelper<StudentWithStats>();
 
 export default function StudentTable({ students }: StudentTableProps) {
   const [sorting, setSorting] = useState<SortingState>([
-    { id: 'studentName', desc: false }
+    { id: 'participantToken', desc: false }
   ]);
-  const [sortKey, setSortKey] = useState('studentName:asc');
+  const [sortKey, setSortKey] = useState('participantToken:asc');
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
 
   const columns = useMemo(
     () => [
-      columnHelper.accessor((row) => `${row.studentLastName}, ${row.studentFirstName}`, {
-        id: 'studentName',
-        header: 'Student',
+      columnHelper.accessor('participantToken', {
+        id: 'participantToken',
+        header: 'Participant',
         cell: (info) => (
-          <div>
-            <div className="text-sm font-medium text-[hsl(var(--foreground))]">{info.getValue()}</div>
-            <div className="text-xs text-[hsl(var(--muted-foreground))]">{info.row.original.studentEmail}</div>
+          <div className="text-sm font-medium text-[hsl(var(--foreground))] font-mono">
+            {info.getValue() || '—'}
           </div>
         ),
-        sortingFn: (rowA, rowB) => {
-          const a = rowA.original;
-          const b = rowB.original;
-          const lastNameCompare = a.studentLastName.localeCompare(b.studentLastName);
-          if (lastNameCompare !== 0) return lastNameCompare;
-          return a.studentFirstName.localeCompare(b.studentFirstName);
-        },
       }),
       columnHelper.accessor('startedAt', {
         header: 'Started',
@@ -148,7 +138,7 @@ export default function StudentTable({ students }: StudentTableProps) {
               >
                 <DeleteStudentSessionButton
                   sessionId={student.id}
-                  studentName={`${student.studentLastName}, ${student.studentFirstName}`}
+                  studentName={student.participantToken}
                 />
               </div>
             </div>
@@ -224,8 +214,8 @@ export default function StudentTable({ students }: StudentTableProps) {
             }}
             className="border border-[hsl(var(--border))] rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] bg-[hsl(var(--background))] text-[hsl(var(--foreground))]"
           >
-            <option value="studentName:asc">Name (A → Z)</option>
-            <option value="studentName:desc">Name (Z → A)</option>
+            <option value="participantToken:asc">Participant (P-001 → ...)</option>
+            <option value="participantToken:desc">Participant (... → P-001)</option>
             <option value="startedAt:desc">Started (Newest)</option>
             <option value="startedAt:asc">Started (Oldest)</option>
             <option value="lastSavedAt:desc">Last Active (Newest)</option>

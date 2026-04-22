@@ -241,7 +241,7 @@ sudo -u postgres pg_dump swag > swag_backup_$(date +%Y%m%d).sql
 sudo -u postgres psql swag < swag_backup_YYYYMMDD.sql
 
 # 데이터베이스 마이그레이션
-npm run db:push
+npm run db:migrate
 ```
 
 ### 5.4 로그 관리

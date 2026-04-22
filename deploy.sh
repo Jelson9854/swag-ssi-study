@@ -91,12 +91,12 @@ fi
 
 echo "✅ .env file ready"
 
-# Step 5: Run database migrations
+# Step 5: Run database migrations (production-safe: use versioned SQL only)
 echo "🔄 Running database migrations..."
 set -a
 source .env
 set +a
-npm run db:push || npm run db:migrate || true
+npm run db:migrate
 
 # Step 6: Stop and remove existing container
 echo "🛑 Stopping existing container..."

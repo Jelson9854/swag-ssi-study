@@ -103,10 +103,10 @@ export default async function ReplayPage({ params }: PageProps) {
               </Link>
               <div>
                 <h1 className="text-lg font-heading font-bold text-[hsl(var(--foreground))]">
-                  Replay: {session.studentLastName}, {session.studentFirstName}
+                  Replay: {session.participantToken}
                 </h1>
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  {assignment.title} • {session.studentEmail}
+                  {assignment.title}
                 </p>
               </div>
             </div>

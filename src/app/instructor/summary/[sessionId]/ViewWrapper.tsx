@@ -23,9 +23,7 @@ const ViewClient = dynamic(() => import('./ViewClient'), {
 interface ViewWrapperProps {
   session: {
     id: string;
-    studentFirstName: string;
-    studentLastName: string;
-    studentEmail: string;
+    participantToken: string;
     startedAt: Date;
     lastSavedAt: Date | null;
   };
@@ -378,11 +376,11 @@ export default function ViewWrapper({
                 </Button>
               </Link>
               <div>
-                <h1 className="text-xl font-heading font-semibold text-[hsl(var(--foreground))]">
-                  {session.studentLastName}, {session.studentFirstName}
+                <h1 className="text-xl font-heading font-semibold text-[hsl(var(--foreground))] font-mono">
+                  {session.participantToken}
                 </h1>
                 <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  {assignment.title} • {session.studentEmail} • Last Saved: {session.lastSavedAt ? new Date(session.lastSavedAt).toLocaleString() : 'Never'}
+                  {assignment.title} • Last Saved: {session.lastSavedAt ? new Date(session.lastSavedAt).toLocaleString() : 'Never'}
                 </p>
               </div>
             </div>
