@@ -96,7 +96,7 @@ echo "🔄 Running database migrations..."
 set -a
 source .env
 set +a
-npm run db:migrate
+PGOPTIONS="-c client_min_messages=warning" npm run db:migrate
 
 # Step 6: Stop and remove existing container
 echo "🛑 Stopping existing container..."

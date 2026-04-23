@@ -79,7 +79,7 @@ export default function NewAssignmentPage() {
     <div className="min-h-screen bg-[hsl(var(--background))]">
       {/* Header */}
       <header className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center gap-4">
             <BackLink href="/instructor/dashboard" label="Back" />
             <h1 className="text-xl font-bold font-heading text-[hsl(var(--foreground))]">New Assignment</h1>
@@ -88,7 +88,7 @@ export default function NewAssignmentPage() {
       </header>
 
       {/* Form */}
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
             <div className="bg-[hsl(var(--destructive))]/10 border border-[hsl(var(--destructive))]/30 text-[hsl(var(--destructive))] px-4 py-3 rounded-lg text-sm">

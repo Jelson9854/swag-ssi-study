@@ -8,10 +8,15 @@ import { useUIStore } from '@/stores/uiStore';
 import SubmissionModal from './SubmissionModal';
 import { Button } from '@/components/ui/button';
 import { FileText, History, Send, Bot, Check, Loader2, ListChecks } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import dynamic from 'next/dynamic';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import { SWAG_CUSTOM_EVENTS } from '@/lib/swag-events';
+import { instructionToPlainText } from '@/lib/instruction-content';
+
+const InstructionEditor = dynamic(
+  () => import('@/components/editor/InstructionEditor'),
+  { ssr: false, loading: () => <div className="p-2 text-[hsl(var(--muted-foreground))]">Loading...</div> }
+);
 
 interface EditorClientProps {
   sessionId: string;
@@ -63,9 +68,9 @@ export default function EditorClient({
   const [showCriteria, setShowCriteria] = useState(false);
 
   useEffect(() => {
-    validator.registerInstruction(assignmentInstructions);
+    validator.registerInstruction(instructionToPlainText(assignmentInstructions));
     if (assignmentCriteria) {
-      validator.registerInstruction(assignmentCriteria);
+      validator.registerInstruction(instructionToPlainText(assignmentCriteria));
     }
   }, [assignmentCriteria, assignmentInstructions, validator]);
 
@@ -268,42 +273,35 @@ export default function EditorClient({
       <div className="flex-1 flex overflow-hidden">
         {/* Editor (Left) */}
         <div className="flex-1 flex flex-col border-r border-[hsl(var(--border))]">
-          {/* Instructions Panel (Collapsible) */}
-          {showInstructions && (
+          {/* Instructions / Criteria Panels (Collapsible) */}
+          {(showInstructions || (showCriteria && hasCriteria)) && (
             <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
-              <div className="max-w-4xl mx-auto p-6">
-                <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Instructions</h2>
-                <div
-                  className="prose prose-sm max-w-none max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg p-4 border border-[hsl(var(--border))]"
-                  onCopy={handleInstructionCopy}
-                >
-                  <div className="text-[hsl(var(--foreground))] prose prose-sm max-w-none dark:prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {assignmentInstructions}
-                    </ReactMarkdown>
+              <div className={`max-w-4xl mx-auto p-6 ${showInstructions && showCriteria && hasCriteria ? 'flex gap-6' : ''}`}>
+                {showInstructions && (
+                  <div className={showCriteria && hasCriteria ? 'flex-1 min-w-0' : ''}>
+                    <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Instructions</h2>
+                    <div
+                      className="max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg border border-[hsl(var(--border))]"
+                      onCopy={handleInstructionCopy}
+                    >
+                      <InstructionEditor initialContent={assignmentInstructions} editable={false} />
+                    </div>
                   </div>
-                </div>
+                )}
+                {showCriteria && hasCriteria && (
+                  <div className={showInstructions ? 'flex-1 min-w-0' : ''}>
+                    <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Criteria</h2>
+                    <div
+                      className="max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg border border-[hsl(var(--border))]"
+                      onCopy={handleInstructionCopy}
+                    >
+                      <InstructionEditor initialContent={assignmentCriteria || ''} editable={false} />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
-
-          {showCriteria && hasCriteria ? (
-            <div className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
-              <div className="max-w-4xl mx-auto p-6">
-                <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">Assignment Criteria</h2>
-                <div
-                  className="prose prose-sm max-w-none max-h-80 overflow-auto bg-[hsl(var(--card))] rounded-lg p-4 border border-[hsl(var(--border))]"
-                  onCopy={handleInstructionCopy}
-                >
-                  <div className="text-[hsl(var(--foreground))] prose prose-sm max-w-none dark:prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {assignmentCriteria || ''}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           {/* Editor */}
           <div className="flex-1 min-h-0 px-6 pb-6 pt-2">

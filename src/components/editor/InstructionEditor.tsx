@@ -30,13 +30,20 @@ export default function InstructionEditor({
       const newEditor = BlockNoteEditor.create();
       activeEditor = newEditor;
 
-      // Load initial markdown content
       if (initialContentRef.current) {
         try {
-          const blocks = await newEditor.tryParseMarkdownToBlocks(initialContentRef.current);
-          newEditor.replaceBlocks(newEditor.document, blocks);
+          // Try JSON first (new format), fall back to Markdown (legacy)
+          let parsed: unknown;
+          try { parsed = JSON.parse(initialContentRef.current); } catch { /* not JSON */ }
+
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            newEditor.replaceBlocks(newEditor.document, parsed as Parameters<typeof newEditor.replaceBlocks>[1]);
+          } else {
+            const blocks = await newEditor.tryParseMarkdownToBlocks(initialContentRef.current);
+            newEditor.replaceBlocks(newEditor.document, blocks);
+          }
         } catch (error) {
-          console.error('Failed to parse markdown:', error);
+          console.error('Failed to parse content:', error);
         }
       }
 
@@ -60,12 +67,11 @@ export default function InstructionEditor({
   useEffect(() => {
     if (!editor || !onChange || !editable) return;
 
-    const handleChange = async () => {
+    const handleChange = () => {
       try {
-        const markdown = await editor.blocksToMarkdownLossy(editor.document);
-        onChange(markdown);
+        onChange(JSON.stringify(editor.document));
       } catch (error) {
-        console.error('Failed to convert to markdown:', error);
+        console.error('Failed to serialize content:', error);
       }
     };
 

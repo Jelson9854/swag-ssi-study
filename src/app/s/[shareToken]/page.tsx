@@ -3,8 +3,7 @@ import { assignments } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { notFound } from 'next/navigation';
 import AccessForm from '@/components/student/AccessForm';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import InstructionEditor from '@/components/editor/InstructionEditor';
 
 interface PageProps {
   params: Promise<{ shareToken: string }>;
@@ -65,7 +64,7 @@ export default async function AssignmentAccessPage({ params }: PageProps) {
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] flex items-center justify-center p-4">
       <div className="max-w-2xl w-full bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-lg shadow-sm p-8">
-        <div className="mb-8">
+        <div className="mb-10">
           <h1 className="text-3xl font-bold text-[hsl(var(--foreground))] mb-2">
             {assignment.title}
           </h1>
@@ -85,11 +84,7 @@ export default async function AssignmentAccessPage({ params }: PageProps) {
           <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-3">
             Instructions
           </h2>
-          <div className="text-[hsl(var(--foreground))] prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {assignment.instructions}
-            </ReactMarkdown>
-          </div>
+          <InstructionEditor initialContent={assignment.instructions} editable={false} />
         </div>
 
         <div>
