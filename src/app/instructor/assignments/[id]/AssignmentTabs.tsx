@@ -6,8 +6,7 @@ import StudentTable from './StudentTable';
 import InstructionEditor from '@/components/editor/InstructionEditor';
 import { Card, CardContent } from '@/components/ui/card';
 import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
-import { Link as LinkIcon, Users, FileText, Brain, ListChecks, Download } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Link as LinkIcon, Users, FileText, Brain, ListChecks } from 'lucide-react';
 
 interface Assignment {
   id: string;
@@ -59,16 +58,6 @@ export default function AssignmentTabs({ assignment, students, shareUrl }: Assig
         <TabPanels>
           <TabPanel>
             <div className="p-0">
-              {students.length > 0 && (
-                <div className="flex justify-end px-4 pt-3 pb-1">
-                  <a href={`/api/assignments/${assignment.id}/participants`} download>
-                    <Button variant="outline" size="sm" className="gap-2 text-xs">
-                      <Download className="w-3.5 h-3.5" />
-                      Download participant mapping (CSV)
-                    </Button>
-                  </a>
-                </div>
-              )}
               <StudentTable students={students} />
             </div>
           </TabPanel>
