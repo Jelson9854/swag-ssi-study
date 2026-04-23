@@ -188,7 +188,7 @@ export async function POST(req: Request) {
     let stream;
     try {
       stream = await openai.responses.create({
-        model: 'gpt-4o',
+        model: process.env.OPENAI_MODEL ?? 'gpt-4o',
         input: [
           { id: 'msg_system', role: 'system', content: systemPrompt },
           ...formattedMessages,
@@ -249,7 +249,7 @@ export async function POST(req: Request) {
             conversationId,
             content: finalContent,
             metadata: {
-              model: 'gpt-4o',
+              model: process.env.OPENAI_MODEL ?? 'gpt-4o',
               webSearchEnabled: webSearchEnabled || false,
               webSearchUsed,
               ...(fullResponse.trim()
@@ -276,7 +276,7 @@ export async function POST(req: Request) {
             conversationId,
             content: `${fullResponse}${recoveryText}`,
             metadata: {
-              model: 'gpt-4o',
+              model: process.env.OPENAI_MODEL ?? 'gpt-4o',
               webSearchEnabled: webSearchEnabled || false,
               webSearchUsed,
               isError: true,
