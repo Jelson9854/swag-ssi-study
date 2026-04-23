@@ -25,6 +25,7 @@ const normalizeForComparison = (value: string): string => {
     .toLowerCase()
     .replace(/[`*_#>|[\]()-]/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?%])/g, '$1')
     .trim();
 };
 
@@ -154,6 +155,15 @@ const collectHighlightMatches = (text: string, highlights: ReplayPasteHighlight[
       }
     }
 
+    if (text.trim().length >= 3) {
+      console.debug('[PasteHighlight] no match for text node', {
+        text: text.slice(0, 120),
+        textLen: text.length,
+        normalizedText: normalizedText.slice(0, 120),
+        snippets: highlights.map((h) => h.snippet.slice(0, 120)),
+      });
+    }
+
     return [];
   }
 
@@ -198,11 +208,9 @@ const renderHighlightedText = (
 
     const highlightedText = text.slice(match.start, match.end);
     parts.push(
-      <button
+      <mark
         key={`${match.highlight.id}-${match.start}-${index}`}
-        type="button"
-        className="inline rounded-sm bg-amber-200/90 px-0.5 text-amber-950 underline decoration-amber-500/70 underline-offset-2 hover:bg-amber-300 transition-colors"
-        style={{ textAlign: 'inherit' }}
+        className="rounded-sm bg-amber-200/90 px-0.5 text-amber-950 underline decoration-amber-500/70 underline-offset-2 hover:bg-amber-300 transition-colors cursor-pointer"
         data-tooltip-id="timeline-tooltip"
         data-tooltip-html={`<div style="max-width: 220px;"><div class="font-semibold text-emerald-300">Internal Paste</div><div class="text-xs text-gray-300 mt-1">at ${match.highlight.timeLabel}</div></div>`}
         aria-label={`Internal paste at ${match.highlight.timeLabel}`}
@@ -214,7 +222,7 @@ const renderHighlightedText = (
         }}
       >
         {highlightedText}
-      </button>
+      </mark>
     );
 
     cursor = match.end;
@@ -243,7 +251,7 @@ export const renderHighlightedChildren = (
 
     const typedChild = child as ReactElement<{ children?: ReactNode }>;
     if (typeof typedChild.type === 'string') {
-      if (typedChild.type === 'code' || typedChild.type === 'pre' || typedChild.type === 'button') {
+      if (typedChild.type === 'code' || typedChild.type === 'pre' || typedChild.type === 'mark') {
         return typedChild;
       }
     }

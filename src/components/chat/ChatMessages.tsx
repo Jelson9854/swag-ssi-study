@@ -63,6 +63,17 @@ export default function ChatMessages({
       }
     });
 
+    if (replayPasteHighlights.length > 0) {
+      console.info('[PasteHighlight] highlights reaching ChatMessages', {
+        total: replayPasteHighlights.length,
+        byMessageId: Array.from(map.entries()).map(([id, hls]) => ({
+          messageId: id,
+          count: hls.length,
+          snippets: hls.map((h) => h.snippet.slice(0, 80)),
+        })),
+      });
+    }
+
     return map;
   }, [replayPasteHighlights]);
 

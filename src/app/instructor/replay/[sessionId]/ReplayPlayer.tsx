@@ -565,6 +565,7 @@ const normalizeForMatching = (value: string): string => {
     .toLowerCase()
     .replace(/[`*_#>|[\]()-]/g, ' ')
     .replace(/\s+/g, ' ')
+    .replace(/\s+([.,;:!?%])/g, '$1')
     .trim();
 };
 
@@ -2028,16 +2029,33 @@ export default function ReplayPlayer({
 
     const highlights: ReplayPasteHighlight[] = [];
 
+    const allPasteEvents = events.filter(
+      (event) => event.eventType === 'paste_internal' || event.eventType === 'paste_external'
+    );
+    console.info('[PasteHighlight] total paste events', {
+      total: allPasteEvents.length,
+      internal: allPasteEvents.filter((e) => e.eventType === 'paste_internal').length,
+      external: allPasteEvents.filter((e) => e.eventType === 'paste_external').length,
+      pastes: allPasteEvents.map((e) => ({
+        type: e.eventType,
+        content: ((e.eventData as { content?: string })?.content || '').slice(0, 100),
+        matchMethod: (e.eventData as { matchMethod?: string })?.matchMethod,
+        sourceArea: (e.eventData as { sourceArea?: string })?.sourceArea,
+      })),
+    });
+
     events
       .filter((event) => event.eventType === 'paste_internal')
       .forEach((event, index) => {
         const pastedContent = ((event.eventData as { content?: string })?.content || '').trim();
         if (pastedContent.length < 3) {
+          console.warn('[PasteHighlight] skipped: content too short', { pastedContent });
           return;
         }
 
         const normalizedPasteContent = normalizeForMatching(pastedContent);
         if (!normalizedPasteContent) {
+          console.warn('[PasteHighlight] skipped: empty normalized content', { pastedContent });
           return;
         }
 
@@ -2054,8 +2072,60 @@ export default function ReplayPlayer({
         }
 
         if (!matchedMessage) {
+          const eligibleMessages = searchableMessages.filter((m) => m.timestamp <= event.timestamp);
+
+          // Locate the closest partial match (first 30 chars) to surface character-level diffs.
+          const probe = normalizedPasteContent.slice(0, 30);
+          const diagnostics = eligibleMessages.slice(-3).map((m) => {
+            const idx = m.normalizedContent.indexOf(probe);
+            let nearbyInMessage: string | null = null;
+            let nearbyInPaste: string | null = null;
+            let diffCharAt: number | null = null;
+            let messageCharCode: number | null = null;
+            let pasteCharCode: number | null = null;
+            if (idx >= 0) {
+              nearbyInMessage = m.normalizedContent.slice(idx, idx + normalizedPasteContent.length + 10);
+              nearbyInPaste = normalizedPasteContent;
+              const minLen = Math.min(nearbyInMessage.length, nearbyInPaste.length);
+              for (let k = 0; k < minLen; k += 1) {
+                if (nearbyInMessage.charCodeAt(k) !== nearbyInPaste.charCodeAt(k)) {
+                  diffCharAt = k;
+                  messageCharCode = nearbyInMessage.charCodeAt(k);
+                  pasteCharCode = nearbyInPaste.charCodeAt(k);
+                  break;
+                }
+              }
+            }
+            return {
+              id: m.id,
+              probeFoundAt: idx,
+              diffCharAt,
+              messageCharCode: messageCharCode !== null ? `${messageCharCode} (${String.fromCharCode(messageCharCode)})` : null,
+              pasteCharCode: pasteCharCode !== null ? `${pasteCharCode} (${String.fromCharCode(pasteCharCode)})` : null,
+              messageNearDiff: nearbyInMessage && diffCharAt !== null
+                ? nearbyInMessage.slice(Math.max(0, diffCharAt - 20), diffCharAt + 20)
+                : null,
+              pasteNearDiff: nearbyInPaste && diffCharAt !== null
+                ? nearbyInPaste.slice(Math.max(0, diffCharAt - 20), diffCharAt + 20)
+                : null,
+              messagePreview: m.normalizedContent.slice(0, 240),
+            };
+          });
+
+          console.warn('[PasteHighlight] no matching chat message', {
+            pastedContent,
+            normalizedPasteContent,
+            diagnostics,
+          });
+          console.warn('[PasteHighlight] diagnostics JSON:', JSON.stringify(diagnostics, null, 2));
           return;
         }
+
+        console.info('[PasteHighlight] matched', {
+          messageId: matchedMessage.id,
+          pastedContent,
+          timestamp: event.timestamp,
+        });
 
         highlights.push({
           id: `paste-highlight-${index}`,
