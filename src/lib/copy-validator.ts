@@ -69,6 +69,22 @@ export class CopyValidator {
   }
 
   /**
+   * Strip inline markdown formatting and normalize whitespace so that plain-text
+   * selections (from getSelection().toString()) can be compared against clipboard
+   * text/plain content that BlockNote serializes with markdown markers.
+   */
+  private stripMarkdown(text: string): string {
+    return text
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
    * Classify pasted content with source metadata.
    */
   classifyPaste(pastedContent: string): PasteClassification {
@@ -83,13 +99,22 @@ export class CopyValidator {
       };
     }
 
-    // 1. Check if it's the recently copied internal content
-    if (this.internalCopyBuffer && trimmed === this.internalCopyBuffer.content) {
-      return {
-        isInternal: true,
-        source: this.internalCopyBuffer.source,
-        matchMethod: 'copy_buffer',
-      };
+    // Markdown-stripped version for comparisons below.
+    // BlockNote serializes clipboard text/plain with markdown markers (**bold**, etc.)
+    // but getSelection().toString() returns rendered plain text without markers.
+    const strippedTrimmed = this.stripMarkdown(trimmed);
+
+    // 1. Check if it's the recently copied internal content (exact or markdown-stripped match)
+    if (this.internalCopyBuffer) {
+      const bufferContent = this.internalCopyBuffer.content;
+      const strippedBuffer = this.stripMarkdown(bufferContent);
+      if (trimmed === bufferContent || strippedTrimmed === strippedBuffer) {
+        return {
+          isInternal: true,
+          source: this.internalCopyBuffer.source,
+          matchMethod: 'copy_buffer',
+        };
+      }
     }
 
     // 2. Exact match in chat history
@@ -110,7 +135,7 @@ export class CopyValidator {
       };
     }
 
-    // 4. Check if pasted content is a substring of any chat message
+    // 4. Check if pasted content is a substring of any chat message (also try stripped version)
     for (const chatContent of this.chatHistory) {
       if (chatContent.includes(trimmed) && trimmed.length >= 10) {
         return {
@@ -119,9 +144,19 @@ export class CopyValidator {
           matchMethod: 'chat_substring',
         };
       }
+      if (strippedTrimmed !== trimmed && strippedTrimmed.length >= 10) {
+        const strippedChatContent = this.stripMarkdown(chatContent);
+        if (strippedChatContent.includes(strippedTrimmed)) {
+          return {
+            isInternal: true,
+            source: 'chat',
+            matchMethod: 'chat_substring',
+          };
+        }
+      }
     }
 
-    // 5. Check if pasted content is a substring of assignment instructions
+    // 5. Check if pasted content is a substring of assignment instructions (also try stripped)
     for (const instructionContent of this.instructionHistory) {
       if (instructionContent.includes(trimmed) && trimmed.length >= 10) {
         return {
@@ -129,6 +164,16 @@ export class CopyValidator {
           source: 'instruction',
           matchMethod: 'instruction_substring',
         };
+      }
+      if (strippedTrimmed !== trimmed && strippedTrimmed.length >= 10) {
+        const strippedInstruction = this.stripMarkdown(instructionContent);
+        if (strippedInstruction.includes(strippedTrimmed)) {
+          return {
+            isInternal: true,
+            source: 'instruction',
+            matchMethod: 'instruction_substring',
+          };
+        }
       }
     }
 

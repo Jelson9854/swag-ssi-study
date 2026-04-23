@@ -155,15 +155,6 @@ const collectHighlightMatches = (text: string, highlights: ReplayPasteHighlight[
       }
     }
 
-    if (text.trim().length >= 3) {
-      console.debug('[PasteHighlight] no match for text node', {
-        text: text.slice(0, 120),
-        textLen: text.length,
-        normalizedText: normalizedText.slice(0, 120),
-        snippets: highlights.map((h) => h.snippet.slice(0, 120)),
-      });
-    }
-
     return [];
   }
 
