@@ -29,7 +29,7 @@ import {
 } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip as TimelineTooltip } from '@/components/ui/tooltip';
-import { Play, Pause, ChevronDown, Check, Keyboard, MessageSquare, ClipboardCopy, AlertTriangle, Send, BarChart3 } from 'lucide-react';
+import { Play, Pause, ChevronDown, Check, Keyboard, MessageSquare, ClipboardCopy, AlertTriangle, Send, BarChart3, Info } from 'lucide-react';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/mantine/style.css';
 
@@ -69,7 +69,7 @@ interface ReplayPlayerProps {
   allowWebSearch: boolean;
 }
 
-const SPEED_OPTIONS = [0.5, 1, 2, 5, 10];
+const SPEED_OPTIONS = [0.5, 1, 2, 5, 10, 20];
 
 const REPLAY_SHORTCUTS = [
   {
@@ -714,7 +714,15 @@ export default function ReplayPlayer({
   // Replay-specific state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(startTime);
-  const [speed, setSpeed] = useState(5); // Keep existing default speed
+  const [speed, setSpeed] = useState<number>(() => {
+    if (typeof window === 'undefined') return 5;
+    const saved = window.localStorage.getItem('replay_speed');
+    const parsed = saved ? Number(saved) : NaN;
+    return SPEED_OPTIONS.includes(parsed) ? parsed : 5;
+  });
+  const IDLE_PRESETS = [15, 30, 60, 120, 180, 300, 600, 900, 1800];
+  const [idleThresholdSeconds, setIdleThresholdSeconds] = useState(180);
+  const idlePresetIndex = IDLE_PRESETS.indexOf(idleThresholdSeconds);
   const [editorDocument, setEditorDocument] = useState<Record<string, unknown>[]>([
     { type: 'paragraph', content: [] }
   ]);
@@ -750,6 +758,7 @@ export default function ReplayPlayer({
 
   const animationRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
+  const idlePeriodsRef = useRef<typeof idlePeriods>([]);
   const lastReplayFrameKeyRef = useRef<string>('');
   const lastProcessedReplayTimeRef = useRef<number>(startTime);
 
@@ -856,6 +865,11 @@ export default function ReplayPlayer({
     () => `${REPLAY_AUTHORSHIP_HIGHLIGHT_STORAGE_KEY}:${replaySessionId}`,
     [replaySessionId]
   );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('replay_speed', String(speed));
+  }, [speed]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1071,7 +1085,7 @@ export default function ReplayPlayer({
 
   // Detect idle periods FIRST (gaps > 3 minutes with no activity)
   const idlePeriods = useMemo(() => {
-    const IDLE_THRESHOLD = 3 * 60 * 1000; // 3 minutes
+    const IDLE_THRESHOLD = idleThresholdSeconds * 1000;
     const allEventTimes: number[] = [];
 
     // Collect all event timestamps
@@ -1107,7 +1121,8 @@ export default function ReplayPlayer({
     }
 
     return periods;
-  }, [events, chatMessages]);
+  }, [events, chatMessages, idleThresholdSeconds]);
+  idlePeriodsRef.current = idlePeriods;
 
   // Calculate compressed timeline (remove idle periods, collapsing breaks)
   const getCompressedTime = useCallback((realTime: number) => {
@@ -1250,14 +1265,15 @@ export default function ReplayPlayer({
         lastFrameTimeRef.current = frameTime;
       }
 
-      const deltaMs = frameTime - lastFrameTimeRef.current;
+      const rawDeltaMs = frameTime - lastFrameTimeRef.current;
+      const deltaMs = Math.min(rawDeltaMs, 100); // cap at 100ms to prevent huge jumps
       lastFrameTimeRef.current = frameTime;
 
       setCurrentTime((prev) => {
         let newTime = prev + deltaMs * speed;
 
         // Check if we're entering an idle period and skip it
-        for (const idle of idlePeriods) {
+        for (const idle of idlePeriodsRef.current) {
           const idleMiddleStart = idle.start + (idle.edgeSeconds * 1000);
           const idleMiddleEnd = idle.end - (idle.edgeSeconds * 1000);
 
@@ -1285,7 +1301,7 @@ export default function ReplayPlayer({
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, speed, endTime, idlePeriods]);
+  }, [isPlaying, speed, endTime]);
 
   useEffect(() => {
     if (isPlaying && currentTime >= endTime) {
@@ -2965,6 +2981,32 @@ export default function ReplayPlayer({
 
           {/* Event Navigation Dropdown */}
           <div className="flex items-center gap-2">
+            {/* Break Threshold Control */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))]"
+                aria-label="Break threshold explanation"
+                data-tooltip-id="timeline-tooltip"
+                data-tooltip-html="Gaps longer than this threshold are treated as breaks and compressed out of the timeline."
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-sm text-[hsl(var(--muted-foreground))]">Break:</span>
+              <input
+                type="range"
+                min={0}
+                max={IDLE_PRESETS.length - 1}
+                step={1}
+                value={idlePresetIndex}
+                onChange={(e) => setIdleThresholdSeconds(IDLE_PRESETS[Number(e.target.value)])}
+                className="w-24 accent-[hsl(var(--primary))] cursor-pointer"
+              />
+              <span className="text-sm text-[hsl(var(--foreground))] w-8 tabular-nums">
+                {idleThresholdSeconds < 60 ? `${idleThresholdSeconds}s` : `${idleThresholdSeconds / 60}m`}
+              </span>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
