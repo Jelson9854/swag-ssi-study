@@ -18,7 +18,7 @@ import DeleteStudentSessionButton from './DeleteStudentSessionButton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip } from '@/components/ui/tooltip';
-import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, PlayCircle, FileText, Users } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, PlayCircle, FileText, Users, MessageSquare } from 'lucide-react';
 
 interface StudentWithStats {
   id: string;
@@ -30,6 +30,7 @@ interface StudentWithStats {
     pasteInternal: number;
     pasteExternal: number;
     snapshots: number;
+    gptInquiries: number;
   };
 }
 
@@ -79,6 +80,17 @@ export default function StudentTable({ students }: StudentTableProps) {
         cell: (info) => (
           <div className="flex">
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
+              {info.getValue()}
+            </span>
+          </div>
+        ),
+      }),
+      columnHelper.accessor('stats.gptInquiries', {
+        header: 'GPT Inquiries',
+        cell: (info) => (
+          <div className="flex">
+            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]">
+              <MessageSquare className="h-3 w-3" />
               {info.getValue()}
             </span>
           </div>
@@ -222,6 +234,8 @@ export default function StudentTable({ students }: StudentTableProps) {
             <option value="lastSavedAt:asc">Last Active (Oldest)</option>
             <option value="stats.submissions:desc">Submissions (High → Low)</option>
             <option value="stats.submissions:asc">Submissions (Low → High)</option>
+            <option value="stats.gptInquiries:desc">GPT Inquiries (High → Low)</option>
+            <option value="stats.gptInquiries:asc">GPT Inquiries (Low → High)</option>
           </select>
         </div>
       </div>

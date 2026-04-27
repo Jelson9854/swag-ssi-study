@@ -29,6 +29,7 @@ interface StudentWithStats {
     pasteInternal: number;
     pasteExternal: number;
     snapshots: number;
+    gptInquiries: number;
   };
 }
 

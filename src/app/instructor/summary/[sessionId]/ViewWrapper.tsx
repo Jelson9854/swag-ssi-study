@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,10 +47,10 @@ interface ViewWrapperProps {
     targetArea: 'editor' | 'chat';
     count: number;
   }>;
-  recentUserInput: {
+  userInputs: Array<{
     content: string;
     timestamp: Date;
-  } | null;
+  }>;
   latestSnapshot: { eventData: Record<string, unknown>[] } | null;
   submissions: Array<{
     id: number;
@@ -221,7 +221,7 @@ export default function ViewWrapper({
   assignment,
   stats,
   pasteRoutes,
-  recentUserInput,
+  userInputs,
   latestSnapshot,
   submissions,
   events,
@@ -338,20 +338,34 @@ export default function ViewWrapper({
     return Math.max(0, endAtMs - startedAtMs);
   }, [latestSubmission, selectedSubmission, session.startedAt]);
 
+  const userInputsDialogRef = useRef<HTMLDialogElement>(null);
+  const userInputsDialogTitleId = useId();
+
+  const openUserInputsDialog = useCallback(() => {
+    userInputsDialogRef.current?.showModal();
+  }, []);
+
+  const closeUserInputsDialog = useCallback(() => {
+    userInputsDialogRef.current?.close();
+  }, []);
+
+  const sortedUserInputs = useMemo(
+    () =>
+      [...userInputs].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      ),
+    [userInputs]
+  );
+
   const recentUserInputPreview = useMemo(() => {
-    if (!recentUserInput) return null;
-    const normalized = recentUserInput.content.replace(/\s+/g, ' ').trim();
-    if (!normalized) {
-      return {
-        text: '(empty message)',
-        timestamp: new Date(recentUserInput.timestamp).toLocaleString(),
-      };
-    }
+    if (sortedUserInputs.length === 0) return null;
+    const latest = sortedUserInputs[sortedUserInputs.length - 1];
+    const normalized = latest.content.replace(/\s+/g, ' ').trim();
     return {
-      text: truncateText(normalized, 80),
-      timestamp: new Date(recentUserInput.timestamp).toLocaleString(),
+      text: normalized ? truncateText(normalized, 80) : '(empty message)',
+      timestamp: new Date(latest.timestamp).toLocaleString(),
     };
-  }, [recentUserInput]);
+  }, [sortedUserInputs]);
 
   const contributionTooltipHtml = useMemo(() => ({
     hcr: buildContributionMetricTooltipHtml('hcr', displayedContributionMetrics),
@@ -413,9 +427,14 @@ export default function ViewWrapper({
                 Typing activity only
               </p>
               {selectedSubmissionElapsedMs !== null && (
-                <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))] border-t border-[hsl(var(--border))] pt-2">
-                  Total elapsed (incl. idle): {formatDurationWithHours(selectedSubmissionElapsedMs)}
-                </p>
+                <div className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+                  <div className="text-2xl font-bold">
+                    {formatDurationWithHours(selectedSubmissionElapsedMs)}
+                  </div>
+                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                    Total elapsed (incl. idle)
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -447,43 +466,45 @@ export default function ViewWrapper({
                   <p className="text-xs text-[hsl(var(--muted-foreground))]">GPT generated</p>
                 </div>
               </div>
-              <div className="mt-3 border-t border-[hsl(var(--border))] pt-3 space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5 text-[hsl(var(--muted-foreground))]">
-                    <span>Human Contribution Ratio</span>
-                    <button
-                      type="button"
-                      className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
-                      aria-label="Explain Human Contribution Ratio"
-                      data-tooltip-id="summary-contribution-metric-tooltip"
-                      data-tooltip-html={contributionTooltipHtml.hcr}
-                    >
-                      <Info className="h-3.5 w-3.5" />
-                    </button>
+              <div className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+                <div className="grid grid-cols-2 divide-x divide-[hsl(var(--border))]">
+                  <div className="pr-3">
+                    <div className="text-xl font-bold text-[hsl(var(--foreground))] lg:text-2xl">
+                      {formatContributionPercentage(displayedContributionMetrics.hcr)}
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-[hsl(var(--muted-foreground))]">
+                      <span>Human Contribution</span>
+                      <button
+                        type="button"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+                        aria-label="Explain Human Contribution Ratio"
+                        data-tooltip-id="summary-contribution-metric-tooltip"
+                        data-tooltip-html={contributionTooltipHtml.hcr}
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <span className="font-medium text-[hsl(var(--foreground))]">
-                    {formatContributionPercentage(displayedContributionMetrics.hcr)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5 text-[hsl(var(--muted-foreground))]">
-                    <span>Human Edit Ratio</span>
-                    <button
-                      type="button"
-                      className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
-                      aria-label="Explain Human Edit Ratio"
-                      data-tooltip-id="summary-contribution-metric-tooltip"
-                      data-tooltip-html={contributionTooltipHtml.her}
-                    >
-                      <Info className="h-3.5 w-3.5" />
-                    </button>
+                  <div className="pl-3">
+                    <div className="text-xl font-bold text-[hsl(var(--foreground))] lg:text-2xl">
+                      {formatContributionPercentage(displayedContributionMetrics.her)}
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-[hsl(var(--muted-foreground))]">
+                      <span>Human Edit</span>
+                      <button
+                        type="button"
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-sm text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] focus-visible:ring-offset-2 focus-visible:ring-offset-[hsl(var(--background))]"
+                        aria-label="Explain Human Edit Ratio"
+                        data-tooltip-id="summary-contribution-metric-tooltip"
+                        data-tooltip-html={contributionTooltipHtml.her}
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <span className="font-medium text-[hsl(var(--foreground))]">
-                    {formatContributionPercentage(displayedContributionMetrics.her)}
-                  </span>
                 </div>
                 {!displayedContributionMetrics.isExact && (
-                  <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                  <p className="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
                     Exact edit logs unavailable
                   </p>
                 )}
@@ -510,6 +531,15 @@ export default function ViewWrapper({
                   <p className="text-xs text-[hsl(var(--foreground))] mt-1 break-words">
                     {recentUserInputPreview.text}
                   </p>
+                  {sortedUserInputs.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={openUserInputsDialog}
+                      className="mt-2 text-xs font-medium text-[hsl(var(--primary))] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))] rounded-sm"
+                    >
+                      More ({sortedUserInputs.length - 1} earlier) →
+                    </button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -533,26 +563,64 @@ export default function ViewWrapper({
                   <p className="text-xs text-[hsl(var(--muted-foreground))]">External</p>
                 </div>
               </div>
-              {pasteRoutes.length > 0 && (
-                <div className="mt-3 border-t border-[hsl(var(--border))] pt-3 space-y-1.5">
-                  {pasteRoutes.slice(0, 3).map((route) => (
-                    <div
-                      key={`${route.sourceArea}-${route.targetArea}`}
-                      className="flex items-center justify-between text-xs"
-                    >
-                      <span className="text-[hsl(var(--muted-foreground))]">
-                        {sourceAreaLabel(route.sourceArea)} → {targetAreaLabel(route.targetArea)}
-                      </span>
-                      <span className="font-medium text-[hsl(var(--foreground))]">{route.count}</span>
-                    </div>
-                  ))}
-                  {pasteRoutes.length > 3 && (
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                      +{pasteRoutes.length - 3} more routes
-                    </p>
-                  )}
-                </div>
-              )}
+              {pasteRoutes.length > 0 && (() => {
+                const sources: Array<ViewWrapperProps['pasteRoutes'][number]['sourceArea']> = [
+                  'chat',
+                  'editor',
+                  'instruction',
+                  'external',
+                ];
+                const targets: Array<ViewWrapperProps['pasteRoutes'][number]['targetArea']> = ['editor', 'chat'];
+                const routeMap = new Map(
+                  pasteRoutes.map((r) => [`${r.sourceArea}->${r.targetArea}`, r.count])
+                );
+                return (
+                  <div className="mt-3 border-t border-[hsl(var(--border))] pt-3">
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr>
+                          <th className="border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-1.5 py-1" />
+                          {sources.map((s) => (
+                            <th
+                              key={`h-${s}`}
+                              className="border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-1.5 py-1 text-[10px] font-normal text-[hsl(var(--muted-foreground))]"
+                            >
+                              {sourceAreaLabel(s)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {targets.map((t) => (
+                          <tr key={`row-${t}`}>
+                            <th
+                              scope="row"
+                              className="border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-1.5 py-1 text-left text-[10px] font-normal text-[hsl(var(--muted-foreground))]"
+                            >
+                              → {targetAreaLabel(t)}
+                            </th>
+                            {sources.map((s) => {
+                              const count = routeMap.get(`${s}->${t}`) ?? 0;
+                              return (
+                                <td
+                                  key={`cell-${s}-${t}`}
+                                  className={
+                                    count > 0
+                                      ? 'border border-[hsl(var(--border))] px-1.5 py-1 text-center font-medium text-[hsl(var(--foreground))]'
+                                      : 'border border-[hsl(var(--border))] px-1.5 py-1 text-center text-[hsl(var(--muted-foreground))]/40'
+                                  }
+                                >
+                                  {count > 0 ? count : '·'}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </div>
@@ -580,6 +648,63 @@ export default function ViewWrapper({
         </Card>
 
       </main>
+
+      <dialog
+        ref={userInputsDialogRef}
+        aria-labelledby={userInputsDialogTitleId}
+        className="m-auto w-[min(48rem,calc(100vw-2rem))] max-h-[80vh] overflow-hidden rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-0 text-[hsl(var(--foreground))] shadow-xl backdrop:bg-black/50"
+        onClick={(event) => {
+          const dialog = userInputsDialogRef.current;
+          if (!dialog) return;
+          const rect = dialog.getBoundingClientRect();
+          const isInside =
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom;
+          if (!isInside) {
+            dialog.close();
+          }
+        }}
+      >
+        <div className="flex flex-col max-h-[80vh]">
+          <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-5 py-3">
+            <h2 id={userInputsDialogTitleId} className="text-base font-semibold">
+              User questions ({sortedUserInputs.length})
+            </h2>
+            <Button type="button" variant="ghost" size="sm" onClick={closeUserInputsDialog}>
+              Close
+            </Button>
+          </div>
+          <div className="overflow-y-auto px-5 py-4 space-y-3">
+            {sortedUserInputs.length === 0 ? (
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">No user messages.</p>
+            ) : (
+              sortedUserInputs.map((input, idx) => {
+                const text = input.content.trim();
+                return (
+                  <div
+                    key={`${idx}-${new Date(input.timestamp).getTime()}`}
+                    className="rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/20 px-3 py-2"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-[10px] uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
+                        #{idx + 1}
+                      </span>
+                      <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                        {new Date(input.timestamp).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm whitespace-pre-wrap break-words">
+                      {text || '(empty message)'}
+                    </p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </dialog>
     </div>
   );
 }

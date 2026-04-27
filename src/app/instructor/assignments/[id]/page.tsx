@@ -1,5 +1,5 @@
 import { db } from '@/db/db';
-import { assignments, studentSessions, editorEvents } from '@/db/schema';
+import { assignments, studentSessions, editorEvents, chatConversations, chatMessages } from '@/db/schema';
 import { eq, count, and, inArray } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
@@ -54,23 +54,39 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
 
   // Single aggregate query for all students' event counts instead of N+1
   const studentIds = students.map(s => s.id);
-  const allEventCounts = studentIds.length > 0
-    ? await db
-        .select({
-          sessionId: editorEvents.sessionId,
-          eventType: editorEvents.eventType,
-          count: count(),
-        })
-        .from(editorEvents)
-        .where(inArray(editorEvents.sessionId, studentIds))
-        .groupBy(editorEvents.sessionId, editorEvents.eventType)
-    : [];
+  const [allEventCounts, gptInquiryCounts] = studentIds.length > 0
+    ? await Promise.all([
+        db
+          .select({
+            sessionId: editorEvents.sessionId,
+            eventType: editorEvents.eventType,
+            count: count(),
+          })
+          .from(editorEvents)
+          .where(inArray(editorEvents.sessionId, studentIds))
+          .groupBy(editorEvents.sessionId, editorEvents.eventType),
+        db
+          .select({
+            sessionId: chatConversations.sessionId,
+            count: count(),
+          })
+          .from(chatMessages)
+          .innerJoin(chatConversations, eq(chatMessages.conversationId, chatConversations.id))
+          .where(
+            and(
+              inArray(chatConversations.sessionId, studentIds),
+              eq(chatMessages.role, 'user')
+            )
+          )
+          .groupBy(chatConversations.sessionId),
+      ])
+    : [[], []];
 
   // Build a map: sessionId -> stats
-  const statsMap = new Map<string, { submissions: number; pasteInternal: number; pasteExternal: number; snapshots: number }>();
+  const statsMap = new Map<string, { submissions: number; pasteInternal: number; pasteExternal: number; snapshots: number; gptInquiries: number }>();
   for (const { sessionId, eventType, count: c } of allEventCounts) {
     if (!statsMap.has(sessionId)) {
-      statsMap.set(sessionId, { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0 });
+      statsMap.set(sessionId, { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0, gptInquiries: 0 });
     }
     const stats = statsMap.get(sessionId)!;
     if (eventType === 'submission') stats.submissions = c;
@@ -78,10 +94,16 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
     else if (eventType === 'paste_external') stats.pasteExternal = c;
     else if (eventType === 'snapshot') stats.snapshots = c;
   }
+  for (const { sessionId, count: c } of gptInquiryCounts) {
+    if (!statsMap.has(sessionId)) {
+      statsMap.set(sessionId, { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0, gptInquiries: 0 });
+    }
+    statsMap.get(sessionId)!.gptInquiries = c;
+  }
 
   const studentsWithStats = students.map(student => ({
     ...student,
-    stats: statsMap.get(student.id) || { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0 },
+    stats: statsMap.get(student.id) || { submissions: 0, pasteInternal: 0, pasteExternal: 0, snapshots: 0, gptInquiries: 0 },
   }));
 
   const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
