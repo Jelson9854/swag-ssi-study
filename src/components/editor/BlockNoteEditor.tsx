@@ -377,8 +377,21 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
   }, [sessionId]);
 
   // Create BlockNote editor with loaded content - only when initialContent is ready
+  // domAttributes are applied at DOM creation time, before Grammarly/LanguageTool can attach.
   const editor = useCreateBlockNote({
     initialContent: initialContent || undefined,
+    domAttributes: {
+      editor: {
+        "data-gramm": "false",
+        "data-gramm_editor": "false",
+        "data-enable-grammarly": "false",
+        "data-lt-active": "false",
+        spellcheck: "false",
+        autocomplete: "off",
+        autocorrect: "off",
+        autocapitalize: "off",
+      },
+    },
   }, [initialContent]);
 
   // Initialize event tracker
@@ -478,6 +491,32 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       window.removeEventListener(SWAG_CUSTOM_EVENTS.SUBMIT_REQUEST, handleSubmissionRequest);
     };
   }, [editor]);
+
+  // Layer 2: block insertReplacementText (AI suggestion-accept events from any extension)
+  useEffect(() => {
+    if (!editor || isLoading) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tiptapEditor = (editor as any)._tiptapEditor;
+    let dom: HTMLElement;
+    try {
+      dom = tiptapEditor?.view?.dom;
+    } catch {
+      return;
+    }
+    if (!dom) return;
+
+    const handleBeforeInput = (e: InputEvent) => {
+      if (e.inputType === "insertReplacementText") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    dom.addEventListener("beforeinput", handleBeforeInput as EventListener, true);
+    return () => {
+      dom.removeEventListener("beforeinput", handleBeforeInput as EventListener, true);
+    };
+  }, [editor, isLoading]);
 
   // Track changes
   useEffect(() => {

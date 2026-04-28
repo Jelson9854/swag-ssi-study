@@ -126,3 +126,15 @@ h6 {
 .recharts-wrapper *:focus {
   outline: none !important;
 }
+
+/* Hide AI text-replacement extension UI (Grammarly, LanguageTool).
+   Grammarly ignores data-gramm="false" in some recent versions and injects
+   <grammarly-extension> shadow roots that break the editor's flex layout. */
+grammarly-extension,
+grammarly-desktop-integration,
+grammarly-popups,
+grammarly-card,
+[data-grammarly-shadow-root="true"],
+[data-lt-installed="true"] {
+  display: none !important;
+}
