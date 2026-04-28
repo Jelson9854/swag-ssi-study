@@ -23,7 +23,6 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [signupEmailSentTo, setSignupEmailSentTo] = useState<string | null>(null);
   const [resetEmailSentTo, setResetEmailSentTo] = useState<string | null>(null);
-  const [surveyStatus, setSurveyStatus] = useState<'pending' | 'consented' | 'declined'>('pending');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +95,6 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
       setLastName('');
       setEmail('');
       setPasscode('');
-      setSurveyStatus('pending');
     } catch (error) {
       setMessage({
         type: 'error',
@@ -166,7 +164,6 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                 setMessage(null);
                 setSignupEmailSentTo(null);
                 setResetEmailSentTo(null);
-                setSurveyStatus('pending');
               }}
               className={mode === 'login' ? 'shadow-sm' : 'text-[hsl(var(--muted-foreground))]'}
             >
@@ -406,115 +403,8 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                 </div>
               )}
 
-              <div
-                className={`rounded-lg border-2 p-4 text-sm transition-colors ${
-                  surveyStatus === 'pending'
-                    ? 'border-amber-400 bg-amber-50 dark:border-amber-500 dark:bg-amber-900/20'
-                    : surveyStatus === 'consented'
-                    ? 'border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-900/15'
-                    : 'border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800/40'
-                }`}
-              >
-                {surveyStatus === 'pending' && (
-                  <>
-                    <p className="font-semibold text-amber-900 dark:text-amber-200">
-                      Required: User Study Consent Form
-                    </p>
-                    <p className="mt-1 text-amber-800 dark:text-amber-300">
-                      Please open the consent form before signing up. If you agree to participate, you&apos;ll also be asked to fill out a short demographic survey.
-                    </p>
-                    <p className="mt-2 text-amber-800 dark:text-amber-300">
-                      <strong>You can use SWAG either way</strong> — your consent only determines whether your usage data is included in the research analysis.
-                    </p>
-                  </>
-                )}
-
-                {surveyStatus === 'consented' && (
-                  <>
-                    <p className="font-semibold text-green-900 dark:text-green-200">
-                      Thank you for joining the research study
-                    </p>
-                    <p className="mt-1 text-green-800 dark:text-green-300">
-                      Your SWAG usage data will be included in our research analysis. You&apos;re all set to sign up below.
-                    </p>
-                  </>
-                )}
-
-                {surveyStatus === 'declined' && (
-                  <>
-                    <p className="font-semibold text-slate-900 dark:text-slate-100">
-                      You&apos;ve declined research participation
-                    </p>
-                    <p className="mt-1 text-slate-700 dark:text-slate-300">
-                      That&apos;s totally fine — you can use SWAG normally. Your usage data will <strong>not</strong> be analyzed for research.
-                    </p>
-                  </>
-                )}
-
-                <a
-                  href="https://virginiatech.qualtrics.com/jfe/form/SV_bvCtH2Sr4uVhEG2"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`mt-2 inline-block font-medium underline ${
-                    surveyStatus === 'pending'
-                      ? 'text-amber-900 dark:text-amber-200'
-                      : surveyStatus === 'consented'
-                      ? 'text-green-900 dark:text-green-200'
-                      : 'text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  {surveyStatus === 'pending' ? 'Open survey in a new tab →' : 'Re-open survey'}
-                </a>
-
-                <fieldset className="mt-3 space-y-2">
-                  <legend
-                    className={`text-xs font-medium uppercase tracking-wide ${
-                      surveyStatus === 'pending'
-                        ? 'text-amber-900 dark:text-amber-200'
-                        : surveyStatus === 'consented'
-                        ? 'text-green-900 dark:text-green-200'
-                        : 'text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    Which option did you choose?
-                  </legend>
-                  <label className="flex items-start gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="survey-status"
-                      checked={surveyStatus === 'consented'}
-                      onChange={() => setSurveyStatus('consented')}
-                      className="mt-0.5 h-4 w-4 cursor-pointer accent-green-600"
-                    />
-                    <span className="text-sm text-[hsl(var(--foreground))]">
-                      I <strong>consented</strong> and finished the demographic survey.
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-2 cursor-pointer select-none">
-                    <input
-                      type="radio"
-                      name="survey-status"
-                      checked={surveyStatus === 'declined'}
-                      onChange={() => setSurveyStatus('declined')}
-                      className="mt-0.5 h-4 w-4 cursor-pointer accent-slate-500"
-                    />
-                    <span className="text-sm text-[hsl(var(--foreground))]">
-                      I <strong>declined</strong> research participation.
-                    </span>
-                  </label>
-                </fieldset>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoading || surveyStatus === 'pending'}
-              >
-                {isLoading
-                  ? 'Sending...'
-                  : surveyStatus === 'pending'
-                  ? 'Open the consent form to continue'
-                  : 'Send Verification Link'}
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? 'Sending...' : 'Send Verification Link'}
               </Button>
             </form>
           )}

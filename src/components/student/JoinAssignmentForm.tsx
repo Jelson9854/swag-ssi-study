@@ -31,18 +31,7 @@ export default function JoinAssignmentForm() {
         throw new Error('Please enter a valid share link or token.');
       }
 
-      const response = await fetch('/api/student-sessions/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shareToken }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to join assignment.');
-      }
-
-      router.push(`/s/${data.shareToken}/editor/${data.sessionId}`);
+      router.push(`/s/${shareToken}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join assignment.');
     } finally {

@@ -81,20 +81,8 @@ export default function VerifyContent() {
         const data = await res.json();
         const resolvedRole = data.role ?? role;
         if (resolvedRole === 'student' && shareToken) {
-          try {
-            const sessionRes = await fetch('/api/student-sessions/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ shareToken }),
-            });
-            if (sessionRes.ok) {
-              const sessionData = await sessionRes.json();
-              router.push(`/s/${sessionData.shareToken}/editor/${sessionData.sessionId}`);
-              return;
-            }
-          } catch {
-            // fall through to dashboard
-          }
+          router.push(`/s/${shareToken}`);
+          return;
         }
 
         if (resolvedRole === 'instructor') {

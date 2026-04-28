@@ -27,6 +27,8 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     role: string;
   } | null>(null);
   const [isChecking, setIsChecking] = useState(true);
+  const [hasExistingSession, setHasExistingSession] = useState<boolean | null>(null);
+  const [surveyOpened, setSurveyOpened] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
@@ -37,27 +39,26 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     async function fetchMe() {
       try {
         const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-          return;
-        }
+        if (!res.ok) return;
         const data = await res.json();
-        if (mounted) {
-          setCurrentUser(data.user);
+        if (!mounted) return;
+        setCurrentUser(data.user);
+
+        if (data.user?.role === 'student') {
+          const checkRes = await fetch(`/api/student-sessions/check?shareToken=${shareToken}`);
+          const checkData = await checkRes.json();
+          if (mounted) setHasExistingSession(checkData.hasSession);
         }
       } catch {
         // ignore
       } finally {
-        if (mounted) {
-          setIsChecking(false);
-        }
+        if (mounted) setIsChecking(false);
       }
     }
 
     fetchMe();
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    return () => { mounted = false; };
+  }, [shareToken]);
 
   const startSession = async () => {
     const response = await fetch('/api/student-sessions/start', {
@@ -242,7 +243,75 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     );
   }
 
+  if (isChecking) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[hsl(var(--primary))]" />
+      </div>
+    );
+  }
+
   if (!isChecking && currentUser?.role === 'student') {
+    const displayName = [currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email;
+
+    if (hasExistingSession === false) {
+      const surveyUrl = `https://virginiatech.qualtrics.com/jfe/form/SV_bvCtH2Sr4uVhEG2?email=${encodeURIComponent(currentUser.email)}&assignmentId=${encodeURIComponent(assignmentId)}`;
+
+      return (
+        <Card className="bg-amber-50/50 dark:bg-amber-900/10 border-amber-300 dark:border-amber-700">
+          <CardContent className="!p-6">
+            <h3 className="text-lg font-semibold text-amber-900 dark:text-amber-200 mb-2">
+              One quick step before you begin
+            </h3>
+            <p className="text-sm text-amber-800 dark:text-amber-300 mb-1">
+              Please complete a short consent form before accessing this assignment.
+            </p>
+            <p className="text-sm text-amber-800 dark:text-amber-300 mb-4">
+              <strong>You can use SWAG either way</strong> — your consent only determines whether your usage data is included in the research analysis.
+            </p>
+            {error && (
+              <div className="text-destructive text-sm bg-destructive/10 p-3 rounded-lg mb-3">
+                {error}
+              </div>
+            )}
+            {!surveyOpened ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  window.open(surveyUrl, '_blank', 'noopener,noreferrer');
+                  setSurveyOpened(true);
+                }}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                Open Consent Form
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={isLoading}
+                onClick={async () => {
+                  setError('');
+                  setIsLoading(true);
+                  try {
+                    await startSession();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Failed to start session');
+                    setIsLoading(false);
+                  }
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white"
+              >
+                {isLoading ? 'Starting...' : 'Start Assignment'}
+              </Button>
+            )}
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-2 text-center">
+              Signing in as {displayName}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
+
     return (
       <Card className="min-h-[200px] bg-green-50/50 dark:bg-green-900/10 border-green-200 dark:border-green-800">
         <CardContent className="!p-6 min-h-[200px] flex items-center">
@@ -252,10 +321,10 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-green-900 dark:text-green-300 mb-2">
-                Continue as {[currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email}
+                Continue as {displayName}
               </h3>
               <p className="text-sm text-green-800 dark:text-green-200 mb-4">
-                We&apos;ll start your session for this assignment.
+                We&apos;ll resume your session for this assignment.
               </p>
               {error && (
                 <div className="text-destructive text-sm bg-destructive/10 p-3 rounded-lg mb-3">
@@ -278,7 +347,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
                 }}
                 className="w-full bg-green-600 hover:bg-green-700 text-white"
               >
-                {isLoading ? 'Starting...' : 'Start Assignment'}
+                {isLoading ? 'Starting...' : 'Continue Assignment'}
               </Button>
             </div>
           </div>
