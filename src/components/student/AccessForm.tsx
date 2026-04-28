@@ -255,7 +255,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     const displayName = [currentUser.firstName, currentUser.lastName].filter(Boolean).join(' ') || currentUser.email;
 
     if (hasExistingSession === false) {
-      const surveyUrl = `https://virginiatech.qualtrics.com/jfe/form/SV_bvCtH2Sr4uVhEG2?email=${encodeURIComponent(currentUser.email)}&assignmentId=${encodeURIComponent(assignmentId)}`;
+      const surveyUrl = `https://virginiatech.qualtrics.com/jfe/form/SV_bvCtH2Sr4uVhEG2?userEmail=${encodeURIComponent(currentUser.email)}&assignmentId=${encodeURIComponent(assignmentId)}`;
 
       return (
         <Card className="bg-amber-50/50 dark:bg-amber-900/10 border-amber-300 dark:border-amber-700">
