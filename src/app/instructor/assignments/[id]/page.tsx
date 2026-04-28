@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { ChevronLeft, Edit2 } from 'lucide-react';
 import AssignmentTabs from './AssignmentTabs';
 import { getInstructor } from '@/lib/auth';
+import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -138,6 +139,7 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
                   Edit
                 </Button>
               </Link>
+              <InstructorHeaderActions email={instructor.email} />
             </div>
           </div>
         </div>

@@ -3180,9 +3180,11 @@ export default function ReplayPlayer({
         {/* Resize Handle - only show when chat is open */}
         {isChatOpen && (
           <div
-            className="w-1 bg-gray-200 hover:bg-blue-500 cursor-col-resize transition-colors"
+            className="w-2 shrink-0 cursor-col-resize flex items-center justify-center hover:bg-[hsl(var(--primary))]/10 transition-colors group"
             onMouseDown={startResize}
-          />
+          >
+            <div className="h-10 w-1 rounded-full bg-[hsl(var(--border))] group-hover:bg-[hsl(var(--primary))]/50 transition-colors" />
+          </div>
         )}
 
         {/* Chat View (Right) - Resizable with ChatPanel */}
