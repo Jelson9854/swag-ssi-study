@@ -241,7 +241,8 @@ export default function ScoreViewer({
     abortRef.current = controller;
     setRunning(true);
     setRunError(null);
-    setRunProgress({ classified, total, failed: 0 });
+    // On a full re-run the server clears the cache first, so show progress from 0.
+    setRunProgress({ classified: force ? 0 : classified, total, failed: 0 });
     let first = true;
     let totalFailed = 0;
     try {
