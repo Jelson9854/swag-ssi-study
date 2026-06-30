@@ -11,10 +11,19 @@ const emailSchema = z.object({
   assignmentId: z.string().uuid(),
 });
 
+const configuredVerificationTtlMinutes = Number.parseInt(process.env.VERIFICATION_TOKEN_TTL_MINUTES || '', 10);
+const VERIFICATION_TOKEN_TTL_MINUTES =
+  Number.isFinite(configuredVerificationTtlMinutes) && configuredVerificationTtlMinutes > 0
+    ? configuredVerificationTtlMinutes
+    : 24 * 60;
+const VERIFICATION_TOKEN_EXPIRES_LABEL = process.env.VERIFICATION_TOKEN_EXPIRES_LABEL || '24 hours';
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, sessionId, assignmentId } = emailSchema.parse(body);
+    const parsed = emailSchema.parse(body);
+    const email = parsed.email.trim().toLowerCase();
+    const { sessionId, assignmentId } = parsed;
 
     // Verify that the session exists and matches the email
     const session = await db.query.studentSessions.findFirst({
@@ -43,7 +52,7 @@ export async function POST(request: Request) {
     // Generate magic link token
     const token = crypto.randomBytes(32).toString('hex');
     const tokenId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MINUTES * 60 * 1000);
 
     // Save token to database
     await db.insert(authTokens).values({
@@ -79,6 +88,7 @@ export async function POST(request: Request) {
             to: email,
             magicLink,
             studentName: `${session.studentFirstName} ${session.studentLastName}`,
+            expiresIn: VERIFICATION_TOKEN_EXPIRES_LABEL,
           });
           console.log('✅ 이메일 발송 성공!');
         } catch (error) {
@@ -92,6 +102,7 @@ export async function POST(request: Request) {
         to: email,
         magicLink,
         studentName: `${session.studentFirstName} ${session.studentLastName}`,
+        expiresIn: VERIFICATION_TOKEN_EXPIRES_LABEL,
       });
     }
 

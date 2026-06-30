@@ -129,8 +129,11 @@ nano .env.production
 chmod +x deploy.sh
 
 # 배포 실행 (도메인 이름을 인자로 전달)
-./deploy.sh your-domain.com
+./deploy.sh swag.cs.vt.edu
 ```
+
+도메인 인자는 필수입니다. 도메인을 생략하면 placeholder Nginx 설정이 생성되어
+나중에 인증서 경로 문제로 Nginx가 시작되지 않을 수 있습니다.
 
 ### 3.2 SSL 인증서 발급
 
@@ -313,6 +316,25 @@ sudo certbot certificates
 
 # Nginx 재시작
 sudo systemctl restart nginx
+```
+
+### 6.5 Nginx가 시작되지 않고 80/443 접속이 거부됨
+
+증상:
+- `curl http://your-domain.com` 또는 `curl https://your-domain.com`이 `Connection refused`
+- `sudo systemctl status nginx`에서 `cannot load certificate ... No such file or directory`
+- 앱 자체는 `curl http://127.0.0.1:3000/api/health`에서 정상 응답
+
+복구:
+
+```bash
+# 최신 deploy.sh는 placeholder 설정을 비활성화하고,
+# 인증서가 없으면 HTTP-only 설정으로 Nginx를 먼저 복구합니다.
+./deploy.sh swag.cs.vt.edu
+
+# 인증서가 아직 없으면 발급 후 HTTPS 설정으로 재배포
+sudo certbot --nginx -d swag.cs.vt.edu
+./deploy.sh swag.cs.vt.edu
 ```
 
 ## 7. 보안 권장사항

@@ -13,7 +13,7 @@ export default function VerifyContent() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
-  const [role, setRole] = useState<'instructor' | 'student' | null>(null);
+  const [role, setRole] = useState<'instructor' | 'administrator' | 'student' | null>(null);
   const [mode, setMode] = useState<'setup' | 'reset'>('setup');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -85,7 +85,7 @@ export default function VerifyContent() {
           return;
         }
 
-        if (resolvedRole === 'instructor') {
+        if (resolvedRole === 'instructor' || resolvedRole === 'administrator') {
           router.push('/instructor/dashboard');
         } else {
           router.push('/student/dashboard');

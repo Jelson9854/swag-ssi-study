@@ -23,6 +23,7 @@ interface Assignment {
   instructions: string;
   criteria: string | null;
   deadline: Date;
+  instructorId: string | null;
   customSystemPrompt: string;
   includeInstructionInPrompt: boolean;
   allowWebSearch: boolean;
@@ -46,7 +47,10 @@ export default function EditAssignmentPage() {
   useEffect(() => {
     async function fetchAssignment() {
       try {
-        const res = await fetch(`/api/assignments/${assignmentId}`);
+        const [res, meRes] = await Promise.all([
+          fetch(`/api/assignments/${assignmentId}`),
+          fetch('/api/auth/me'),
+        ]);
         if (!res.ok) {
           if (res.status === 401) {
             router.push('/login');
@@ -55,6 +59,14 @@ export default function EditAssignmentPage() {
           throw new Error('Failed to load assignment');
         }
         const data = await res.json();
+        const meData = meRes.ok ? await meRes.json() : null;
+
+        if (data.instructorId !== meData?.user?.id) {
+          setError('Only the owner can edit this assignment.');
+          setAssignment(null);
+          return;
+        }
+
         setAssignment({
           ...data,
           customSystemPrompt: resolveAssignmentAiGuidance(data.customSystemPrompt),

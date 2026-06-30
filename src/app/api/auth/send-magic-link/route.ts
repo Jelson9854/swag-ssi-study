@@ -4,6 +4,8 @@ import { authTokens, instructors } from '@/db/schema';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
+import type { InstructorRole } from '@/lib/auth';
+import { getAllowedEmailDomainsLabel, isEmailDomainAllowed } from '@/lib/email-domain';
 
 const signupSchema = z.object({
   email: z.string().email(),
@@ -13,41 +15,49 @@ const signupSchema = z.object({
   shareToken: z.string().optional(),
 });
 
-// Allowed email domains (can be configured via env)
-const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS?.split(',') || ['vt.edu'];
+const configuredVerificationTtlMinutes = Number.parseInt(process.env.VERIFICATION_TOKEN_TTL_MINUTES || '', 10);
+const VERIFICATION_TOKEN_TTL_MINUTES =
+  Number.isFinite(configuredVerificationTtlMinutes) && configuredVerificationTtlMinutes > 0
+    ? configuredVerificationTtlMinutes
+    : 24 * 60;
+const VERIFICATION_TOKEN_EXPIRES_LABEL = process.env.VERIFICATION_TOKEN_EXPIRES_LABEL || '24 hours';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, firstName, lastName, passcode, shareToken } = signupSchema.parse(body);
+    const parsed = signupSchema.parse(body);
+    const email = parsed.email.trim().toLowerCase();
+    const { firstName, lastName, passcode, shareToken } = parsed;
 
     const trimmedPasscode = passcode?.trim();
     const instructorPasscode = process.env.INSTRUCTOR_PASSCODE;
-    let role: 'instructor' | 'student' = 'student';
+    const administratorPasscode = process.env.ADMINISTRATOR_PASSCODE || process.env.ADMIN_PASSCODE;
+    let role: InstructorRole | 'student' = 'student';
 
     if (trimmedPasscode) {
-      // Instructor signup still enforces allowed domains
-    const domain = email.split('@')[1];
-    if (!ALLOWED_DOMAINS.includes(domain)) {
-      return NextResponse.json(
-        { error: `Only ${ALLOWED_DOMAINS.join(', ')} email addresses are allowed` },
-        { status: 403 }
-      );
-      }
-
-      if (!instructorPasscode || trimmedPasscode !== instructorPasscode) {
+      if (!isEmailDomainAllowed(email)) {
         return NextResponse.json(
-          { error: 'Invalid instructor passcode' },
+          { error: `Only ${getAllowedEmailDomainsLabel()} email addresses are allowed` },
           { status: 403 }
         );
       }
-      role = 'instructor';
+
+      if (administratorPasscode && trimmedPasscode === administratorPasscode) {
+        role = 'administrator';
+      } else if (instructorPasscode && trimmedPasscode === instructorPasscode) {
+        role = 'instructor';
+      } else {
+        return NextResponse.json(
+          { error: 'Invalid instructor or administrator passcode' },
+          { status: 403 }
+        );
+      }
     }
 
     // Generate magic link token
     const token = crypto.randomBytes(32).toString('hex');
     const tokenId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MINUTES * 60 * 1000);
 
     // Save token to database
     await db.insert(authTokens).values({
@@ -115,6 +125,7 @@ export async function POST(request: Request) {
           to: email,
           magicLink,
           studentName: recipientName,
+          expiresIn: VERIFICATION_TOKEN_EXPIRES_LABEL,
         });
         return;
       }
@@ -123,6 +134,7 @@ export async function POST(request: Request) {
       await sendMagicLink({
         to: email,
         magicLink,
+        expiresIn: VERIFICATION_TOKEN_EXPIRES_LABEL,
       });
     };
 

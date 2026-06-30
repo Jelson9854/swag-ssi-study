@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { db } from '@/db/db';
 import { instructors, studentSessions, chatConversations, chatMessages, editorEvents, assignments } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { isInstructorRole } from '@/lib/auth';
 
 async function getInstructor() {
   const cookieStore = await cookies();
@@ -16,7 +17,7 @@ async function getInstructor() {
     where: eq(instructors.id, userId),
   });
 
-  if (!user || user.role !== 'instructor') {
+  if (!user || !isInstructorRole(user.role)) {
     return null;
   }
 
@@ -87,4 +88,3 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     );
   }
 }
-

@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
+    "db:import-nirvana": "tsx src/db/import-nirvana.ts",
     "export:participants": "tsx scripts/export-participants.ts",
     "db:local:up": "docker compose -f docker-compose.local.yml up -d",
     "db:local:down": "docker compose -f docker-compose.local.yml down",

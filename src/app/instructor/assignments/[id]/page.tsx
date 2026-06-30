@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, Edit2 } from 'lucide-react';
 import AssignmentTabs from './AssignmentTabs';
-import { getInstructor } from '@/lib/auth';
+import { getInstructor, isAdministrator } from '@/lib/auth';
 import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
 
 interface PageProps {
@@ -22,14 +22,18 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
     redirect('/login');
   }
 
+  const assignmentWhere = isAdministrator(instructor)
+    ? eq(assignments.id, id)
+    : and(
+        eq(assignments.id, id),
+        eq(assignments.instructorId, instructor.id)
+      );
+
   // Parallelize independent queries
   const [requestHeaders, assignment, students] = await Promise.all([
     headers(),
     db.query.assignments.findFirst({
-      where: and(
-        eq(assignments.id, id),
-        eq(assignments.instructorId, instructor.id)
-      ),
+      where: assignmentWhere,
     }),
     db
       .select({
@@ -109,6 +113,7 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
 
   const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
   const isOverdue = new Date(assignment.deadline) < new Date();
+  const canEdit = assignment.instructorId === instructor.id;
   const normalizedAssignment = {
     ...assignment,
     includeInstructionInPrompt: assignment.includeInstructionInPrompt ?? false,
@@ -133,12 +138,14 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href={`/instructor/assignments/${id}/edit`}>
-                <Button variant="outline">
-                  <Edit2 className="w-4 h-4 mr-2" />
-                  Edit
-                </Button>
-              </Link>
+              {canEdit && (
+                <Link href={`/instructor/assignments/${id}/edit`}>
+                  <Button variant="outline">
+                    <Edit2 className="w-4 h-4 mr-2" />
+                    Edit
+                  </Button>
+                </Link>
+              )}
               <InstructorHeaderActions email={instructor.email} />
             </div>
           </div>

@@ -4,6 +4,7 @@ import { db } from '@/db/db';
 import { assignments, instructors, studentSessions, editorEvents, chatConversations, chatMessages } from '@/db/schema';
 import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
 import { eq, and } from 'drizzle-orm';
+import { isAdministrator, isInstructorRole } from '@/lib/auth';
 
 async function getInstructor() {
   const cookieStore = await cookies();
@@ -17,7 +18,7 @@ async function getInstructor() {
     where: eq(instructors.id, userId),
   });
 
-  if (!user || user.role !== 'instructor') {
+  if (!user || !isInstructorRole(user.role)) {
     return null;
   }
 
@@ -38,11 +39,15 @@ export async function GET(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const assignmentWhere = isAdministrator(instructor)
+      ? eq(assignments.id, id)
+      : and(
+          eq(assignments.id, id),
+          eq(assignments.instructorId, instructor.id)
+        );
+
     const assignment = await db.query.assignments.findFirst({
-      where: and(
-        eq(assignments.id, id),
-        eq(assignments.instructorId, instructor.id)
-      ),
+      where: assignmentWhere,
     });
 
     if (!assignment) {

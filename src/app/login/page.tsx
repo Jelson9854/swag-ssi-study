@@ -4,6 +4,8 @@ import { db } from '@/db/db';
 import { instructors } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import LoginForm from '@/components/auth/LoginForm';
+import { isInstructorRole } from '@/lib/auth';
+import { getAllowedEmailDomainsLabel, isEmailDomainRestrictionEnabled } from '@/lib/email-domain';
 
 export default async function LoginPage() {
   const cookieStore = await cookies();
@@ -14,10 +16,14 @@ export default async function LoginPage() {
       where: eq(instructors.id, userId),
     });
 
-    if (user?.role === 'instructor') redirect('/instructor/dashboard');
+    if (isInstructorRole(user?.role)) redirect('/instructor/dashboard');
     if (user?.role === 'student') redirect('/student/dashboard');
   }
 
-  const allowedDomains = process.env.ALLOWED_EMAIL_DOMAINS || 'vt.edu';
-  return <LoginForm allowedDomains={allowedDomains} />;
+  return (
+    <LoginForm
+      allowedDomains={getAllowedEmailDomainsLabel()}
+      emailDomainRestrictionEnabled={isEmailDomainRestrictionEnabled()}
+    />
+  );
 }

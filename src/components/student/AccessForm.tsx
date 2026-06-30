@@ -198,7 +198,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
               </p>
               <p className="text-sm text-blue-700 dark:text-blue-300/80">
                 Click the link in the email to set your password and access the assignment.
-                The link will expire in 15 minutes.
+                The link will expire in 24 hours.
               </p>
             </div>
           </div>
@@ -356,7 +356,9 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
     );
   }
 
-  if (!isChecking && currentUser?.role === 'instructor') {
+  if (!isChecking && (currentUser?.role === 'instructor' || currentUser?.role === 'administrator')) {
+    const accountType = currentUser.role === 'administrator' ? 'Administrator' : 'Instructor';
+
     return (
       <Card className="min-h-[200px] bg-yellow-50/50 dark:bg-yellow-900/10 border-yellow-200 dark:border-yellow-800">
         <CardContent className="!p-6 min-h-[200px] flex items-center">
@@ -366,7 +368,7 @@ export default function AccessForm({ assignmentId, shareToken }: AccessFormProps
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-semibold text-yellow-900 dark:text-yellow-300 mb-2">
-                Instructor account detected
+                {accountType} account detected
               </h3>
               <p className="text-sm text-yellow-800 dark:text-yellow-200">
                 Please log out and sign in with a student account to access this assignment.

@@ -8,9 +8,10 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 
 interface LoginFormProps {
   allowedDomains: string;
+  emailDomainRestrictionEnabled: boolean;
 }
 
-export default function LoginForm({ allowedDomains }: LoginFormProps) {
+export default function LoginForm({ allowedDomains, emailDomainRestrictionEnabled }: LoginFormProps) {
   const router = useRouter();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [firstName, setFirstName] = useState('');
@@ -44,7 +45,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
         throw new Error(data.error || 'Login failed');
       }
 
-      if (data.user?.role === 'instructor') {
+      if (data.user?.role === 'instructor' || data.user?.role === 'administrator') {
         router.push('/instructor/dashboard');
       } else {
         router.push('/student/dashboard');
@@ -139,8 +140,10 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
     }
   };
 
-  const emailPlaceholder = `you@${allowedDomains.split(',')[0]}`;
-  const domainText = allowedDomains.split(',').map(d => `@${d}`).join(', ');
+  const emailPlaceholder = emailDomainRestrictionEnabled
+    ? `you@${allowedDomains.split(',')[0]}`
+    : 'you@example.com';
+  const domainText = allowedDomains.split(',').map(d => `@${d.trim()}`).join(', ');
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] py-12 px-4 sm:px-6 lg:px-8">
@@ -382,7 +385,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
 
               <div className="space-y-2">
                 <label htmlFor="signup-passcode" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                  Instructor Passcode <span className="text-[hsl(var(--muted-foreground))] font-normal">(Optional)</span>
+                  Instructor or Administrator Passcode <span className="text-[hsl(var(--muted-foreground))] font-normal">(Optional)</span>
                 </label>
                 <Input
                   id="signup-passcode"
@@ -391,7 +394,7 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
                   autoComplete="off"
                   value={passcode}
                   onChange={(e) => setPasscode(e.target.value)}
-                  placeholder="For instructors only"
+                  placeholder="For instructors and administrators only"
                 />
               </div>
 
@@ -411,7 +414,13 @@ export default function LoginForm({ allowedDomains }: LoginFormProps) {
         </CardContent>
         <CardFooter className="justify-center border-t border-[hsl(var(--border))] pt-6">
           <p className="text-xs text-[hsl(var(--muted-foreground))] text-center">
-            Only <span className="font-medium text-[hsl(var(--foreground))]">{domainText}</span> email addresses are allowed
+            {emailDomainRestrictionEnabled ? (
+              <>
+                Only <span className="font-medium text-[hsl(var(--foreground))]">{domainText}</span> email addresses are allowed
+              </>
+            ) : (
+              'Any valid email address can sign up'
+            )}
           </p>
         </CardFooter>
       </Card>

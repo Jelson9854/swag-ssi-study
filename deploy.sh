@@ -8,7 +8,7 @@ set -e
 # Configuration
 CONTAINER_NAME="swag"
 IMAGE_NAME="swag:latest"
-DOMAIN="${1:-swag.example.com}"
+DOMAIN="${1:-}"
 CONTAINER_PORT="3000"
 HOST_PORT="127.0.0.1:3000"
 
@@ -18,6 +18,12 @@ DB_USER="swag"
 DB_PASSWORD="swag"
 DB_HOST="127.0.0.1"
 DB_PORT="5432"
+
+if [ -z "$DOMAIN" ]; then
+    echo "❌ Domain is required."
+    echo "   Usage: ./deploy.sh swag.cs.vt.edu"
+    exit 1
+fi
 
 echo "🚀 Starting deployment for $DOMAIN..."
 
@@ -156,22 +162,37 @@ fi
 
 # Step 10: Configure Nginx
 echo "🌐 Configuring Nginx..."
-sudo tee /etc/nginx/conf.d/$DOMAIN.conf > /dev/null << 'NGINX_EOF'
+
+# Disable the default placeholder config if it was accidentally created by an
+# earlier run. A broken SSL config for any domain prevents all of Nginx from
+# starting.
+if [ "$DOMAIN" != "swag.example.com" ] && [ -f /etc/nginx/conf.d/swag.example.com.conf ]; then
+    echo "🧹 Disabling stale swag.example.com Nginx config..."
+    sudo mv /etc/nginx/conf.d/swag.example.com.conf "/etc/nginx/conf.d/swag.example.com.conf.disabled.$(date +%Y%m%d%H%M%S)"
+fi
+
+CERT_FULLCHAIN="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
+CERT_PRIVKEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+
+if sudo test -f "$CERT_FULLCHAIN" && sudo test -f "$CERT_PRIVKEY"; then
+    echo "🔐 Existing SSL certificate found. Writing HTTPS Nginx config..."
+    sudo tee /etc/nginx/conf.d/$DOMAIN.conf > /dev/null << NGINX_EOF
 server {
     listen 80;
-    server_name DOMAIN_PLACEHOLDER;
+    server_name $DOMAIN;
 
     # Redirect HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
+    return 301 https://\$server_name\$request_uri;
 }
 
 server {
-    listen 443 ssl http2;
-    server_name DOMAIN_PLACEHOLDER;
+    listen 443 ssl;
+    http2 on;
+    server_name $DOMAIN;
 
     # SSL configuration (will be managed by Certbot)
-    ssl_certificate /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+    ssl_certificate $CERT_FULLCHAIN;
+    ssl_certificate_key $CERT_PRIVKEY;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
@@ -187,13 +208,13 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
 
         # Timeouts
         proxy_connect_timeout 60s;
@@ -205,23 +226,49 @@ server {
     client_max_body_size 10M;
 }
 NGINX_EOF
+else
+    echo "⚠️  SSL certificate not found. Writing HTTP-only Nginx config for Certbot/bootstrap..."
+    sudo tee /etc/nginx/conf.d/$DOMAIN.conf > /dev/null << NGINX_EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
 
-# Replace domain placeholder
-sudo sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /etc/nginx/conf.d/$DOMAIN.conf
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    client_max_body_size 10M;
+}
+NGINX_EOF
+fi
 
 # Test Nginx configuration
 echo "🔍 Testing Nginx configuration..."
 sudo nginx -t
 
-# Reload Nginx
-echo "🔄 Reloading Nginx..."
-sudo systemctl reload nginx
+# Reload or restart Nginx. If Nginx is currently failed/stopped, plain reload
+# will not bring it back up.
+echo "🔄 Reloading or restarting Nginx..."
+sudo systemctl reload-or-restart nginx
 
 echo ""
 echo "📋 Next steps:"
 echo "1. Make sure DNS is pointing to this server"
-echo "2. Run Certbot to get SSL certificate:"
+echo "2. If HTTPS is not configured yet, run Certbot to get SSL certificate:"
 echo "   sudo certbot --nginx -d $DOMAIN"
+echo "   ./deploy.sh $DOMAIN"
 echo ""
 echo "✅ Deployment complete!"
 echo "🌐 App will be available at: https://$DOMAIN (after SSL setup)"

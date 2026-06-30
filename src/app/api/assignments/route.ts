@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { db } from '@/db/db';
-import { assignments, instructors } from '@/db/schema';
+import { assignments } from '@/db/schema';
 import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
-import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
+import { getInstructor } from '@/lib/auth';
 
 function generateShareToken(): string {
   // Generate a URL-friendly token
@@ -13,23 +12,9 @@ function generateShareToken(): string {
 
 export async function POST(request: Request) {
   try {
-    // Verify instructor session
-    const cookieStore = await cookies();
-    const userId = cookieStore.get('user_session')?.value;
+    const instructor = await getInstructor();
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
-    // Verify instructor exists
-    const instructor = await db.query.instructors.findFirst({
-      where: eq(instructors.id, userId),
-    });
-
-    if (!instructor || instructor.role !== 'instructor') {
+    if (!instructor) {
       return NextResponse.json(
         { error: 'Instructor not found' },
         { status: 401 }

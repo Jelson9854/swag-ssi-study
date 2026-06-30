@@ -8,7 +8,7 @@ export const instructors = pgTable('instructors', {
   password: text('password'), // Hashed password (null if not verified yet)
   firstName: text('first_name'),
   lastName: text('last_name'),
-  role: text('role').notNull().default('instructor'), // 'instructor' | 'student'
+  role: text('role').notNull().default('instructor'), // 'instructor' | 'administrator' | 'student'
   isVerified: boolean('is_verified').default(false).notNull(),
   createdAt: timestamp('created_at').notNull(),
   lastLoginAt: timestamp('last_login_at'),
@@ -57,6 +57,9 @@ export const studentSessions = pgTable('student_sessions', {
   startedAt: timestamp('started_at').notNull(),
   lastSavedAt: timestamp('last_saved_at'),
   lastLoginAt: timestamp('last_login_at'),
+  // Free-form per-session attributes (e.g. imported NIRVANA participant survey
+  // scales, writer-profile groupings, readability, and aggregate metrics).
+  metadata: jsonb('metadata'),
 });
 
 export const editorEvents = pgTable('editor_events', {

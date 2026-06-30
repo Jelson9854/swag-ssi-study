@@ -3,7 +3,7 @@ import { studentSessions, assignments, editorEvents, chatConversations, chatMess
 import { eq, and, asc, inArray } from 'drizzle-orm';
 import { redirect, notFound } from 'next/navigation';
 import ViewWrapper from './ViewWrapper';
-import { getInstructor } from '@/lib/auth';
+import { getInstructor, isAdministrator } from '@/lib/auth';
 
 type PasteSourceArea = 'chat' | 'editor' | 'instruction' | 'external' | 'unknown';
 type PasteTargetArea = 'editor' | 'chat';
@@ -29,12 +29,14 @@ export default async function ViewPage({ params }: PageProps) {
     notFound();
   }
 
-  // Verify instructor owns this assignment
+  // Verify instructor can access this assignment
   const assignment = await db.query.assignments.findFirst({
-    where: and(
-      eq(assignments.id, session.assignmentId),
-      eq(assignments.instructorId, instructor.id)
-    ),
+    where: isAdministrator(instructor)
+      ? eq(assignments.id, session.assignmentId)
+      : and(
+          eq(assignments.id, session.assignmentId),
+          eq(assignments.instructorId, instructor.id)
+        ),
   });
 
   if (!assignment) {

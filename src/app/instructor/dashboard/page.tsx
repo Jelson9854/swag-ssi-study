@@ -1,5 +1,5 @@
 import { db } from '@/db/db';
-import { assignments, studentSessions } from '@/db/schema';
+import { assignments, instructors, studentSessions } from '@/db/schema';
 import { eq, desc, count, sql } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import EmptyStateCard from '@/components/ui/EmptyStateCard';
 import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
 import { Plus, Users, Calendar, Edit2 } from 'lucide-react';
-import { getInstructor } from '@/lib/auth';
+import { getInstructor, isAdministrator } from '@/lib/auth';
 
 export default async function DashboardPage() {
   const instructor = await getInstructor();
@@ -19,20 +19,30 @@ export default async function DashboardPage() {
     redirect('/login');
   }
 
+  const isAdmin = isAdministrator(instructor);
+  const assignmentsQuery = db
+    .select({
+      id: assignments.id,
+      title: assignments.title,
+      deadline: assignments.deadline,
+      shareToken: assignments.shareToken,
+      instructorId: assignments.instructorId,
+      createdAt: assignments.createdAt,
+      ownerEmail: instructors.email,
+      ownerFirstName: instructors.firstName,
+      ownerLastName: instructors.lastName,
+    })
+    .from(assignments)
+    .leftJoin(instructors, eq(assignments.instructorId, instructors.id));
+
   // Parallelize independent queries
   const [requestHeaders, instructorAssignments] = await Promise.all([
     headers(),
-    db
-      .select({
-        id: assignments.id,
-        title: assignments.title,
-        deadline: assignments.deadline,
-        shareToken: assignments.shareToken,
-        createdAt: assignments.createdAt,
-      })
-      .from(assignments)
-      .where(eq(assignments.instructorId, instructor.id))
-      .orderBy(desc(assignments.createdAt)),
+    isAdmin
+      ? assignmentsQuery.orderBy(desc(assignments.createdAt))
+      : assignmentsQuery
+          .where(eq(assignments.instructorId, instructor.id))
+          .orderBy(desc(assignments.createdAt)),
   ]);
 
   const forwardedProto = requestHeaders.get('x-forwarded-proto') ?? 'http';
@@ -58,6 +68,8 @@ export default async function DashboardPage() {
   const assignmentWithCounts = instructorAssignments.map(assignment => ({
     ...assignment,
     studentCount: countMap.get(assignment.id) || 0,
+    ownerName: [assignment.ownerFirstName, assignment.ownerLastName].filter(Boolean).join(' ') || assignment.ownerEmail || 'Unknown',
+    canEdit: assignment.instructorId === instructor.id,
   }));
 
   return (
@@ -68,7 +80,9 @@ export default async function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold font-heading text-[hsl(var(--foreground))]">SWAG</h1>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">Instructor Dashboard</p>
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                {isAdmin ? 'Administrator Dashboard' : 'Instructor Dashboard'}
+              </p>
             </div>
             <InstructorHeaderActions email={instructor.email} />
           </div>
@@ -79,7 +93,9 @@ export default async function DashboardPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Create Assignment Button */}
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold font-heading text-[hsl(var(--foreground))]">Your Assignments</h2>
+          <h2 className="text-xl font-semibold font-heading text-[hsl(var(--foreground))]">
+            {isAdmin ? 'All Assignments' : 'Your Assignments'}
+          </h2>
           <Link href="/instructor/assignments/new">
             <Button className="font-medium gap-2">
               <Plus className="w-4 h-4" />
@@ -117,6 +133,11 @@ export default async function DashboardPage() {
                     <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                       Students
                     </th>
+                    {isAdmin && (
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
+                        Instructor
+                      </th>
+                    )}
                     <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                       Share Link
                     </th>
@@ -152,16 +173,23 @@ export default async function DashboardPage() {
                             {assignment.studentCount}
                           </div>
                         </td>
+                        {isAdmin && (
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-[hsl(var(--muted-foreground))]">
+                            {assignment.ownerName}
+                          </td>
+                        )}
                         <td className="px-6 py-4 whitespace-nowrap">
                           <CopyLinkButton url={shareUrl} iconOnly={false} />
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm">
                           <div className="flex items-center justify-end gap-2">
-                            <Link href={`/instructor/assignments/${assignment.id}/edit`} title="Edit Assignment">
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
-                                <Edit2 className="w-4 h-4" />
-                              </Button>
-                            </Link>
+                            {assignment.canEdit && (
+                              <Link href={`/instructor/assignments/${assignment.id}/edit`} title="Edit Assignment">
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
+                                  <Edit2 className="w-4 h-4" />
+                                </Button>
+                              </Link>
+                            )}
                           </div>
                         </td>
                       </tr>

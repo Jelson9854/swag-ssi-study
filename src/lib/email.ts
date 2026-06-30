@@ -3,17 +3,26 @@ import nodemailer from 'nodemailer';
 interface SendMagicLinkParams {
   to: string;
   magicLink: string;
+  expiresIn?: string;
 }
 
 interface SendStudentVerificationParams {
   to: string;
   magicLink: string;
   studentName: string;
+  expiresIn?: string;
 }
 
 interface SendPasswordResetParams {
   to: string;
   resetLink: string;
+  expiresIn?: string;
+}
+
+function maskEmail(email: string) {
+  const [localPart, domain] = email.split('@');
+  if (!domain) return email;
+  return `${localPart.slice(0, 2)}***@${domain}`;
 }
 
 // Gmail SMTP transporter 설정
@@ -27,7 +36,7 @@ const createTransporter = () => {
   });
 };
 
-export async function sendMagicLink({ to, magicLink }: SendMagicLinkParams) {
+export async function sendMagicLink({ to, magicLink, expiresIn = '24 hours' }: SendMagicLinkParams) {
   const fromAddress = process.env.EMAIL_FROM || process.env.GMAIL_USER || 'SWAG';
 
   try {
@@ -61,7 +70,7 @@ export async function sendMagicLink({ to, magicLink }: SendMagicLinkParams) {
             </div>
 
             <div style="font-size: 14px; color: #666;">
-              <p style="margin: 0 0 10px 0;">This link will expire in 15 minutes.</p>
+              <p style="margin: 0 0 10px 0;">This link will expire in ${expiresIn}.</p>
               <p style="margin: 0;">If you didn't request this login link, you can safely ignore this email.</p>
             </div>
 
@@ -77,6 +86,7 @@ export async function sendMagicLink({ to, magicLink }: SendMagicLinkParams) {
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.info(`Instructor verification email accepted by SMTP for ${maskEmail(to)}: ${info.messageId}`);
     
     return { success: true, messageId: info.messageId };
   } catch (error) {
@@ -85,7 +95,7 @@ export async function sendMagicLink({ to, magicLink }: SendMagicLinkParams) {
   }
 }
 
-export async function sendStudentVerificationEmail({ to, magicLink, studentName }: SendStudentVerificationParams) {
+export async function sendStudentVerificationEmail({ to, magicLink, studentName, expiresIn = '24 hours' }: SendStudentVerificationParams) {
   const fromAddress = process.env.EMAIL_FROM || process.env.GMAIL_USER || 'SWAG';
 
   try {
@@ -120,7 +130,7 @@ export async function sendStudentVerificationEmail({ to, magicLink, studentName 
             </div>
 
             <div style="font-size: 14px; color: #666;">
-              <p style="margin: 0 0 10px 0;">This link will expire in 15 minutes.</p>
+              <p style="margin: 0 0 10px 0;">This link will expire in ${expiresIn}.</p>
               <p style="margin: 0;">If you didn't request access to this assignment, you can safely ignore this email.</p>
             </div>
 
@@ -136,6 +146,7 @@ export async function sendStudentVerificationEmail({ to, magicLink, studentName 
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.info(`Student verification email accepted by SMTP for ${maskEmail(to)}: ${info.messageId}`);
     
     return { success: true, messageId: info.messageId };
   } catch (error) {
@@ -144,7 +155,7 @@ export async function sendStudentVerificationEmail({ to, magicLink, studentName 
   }
 }
 
-export async function sendPasswordResetEmail({ to, resetLink }: SendPasswordResetParams) {
+export async function sendPasswordResetEmail({ to, resetLink, expiresIn = '15 minutes' }: SendPasswordResetParams) {
   const fromAddress = process.env.EMAIL_FROM || process.env.GMAIL_USER || 'SWAG';
 
   try {
@@ -178,7 +189,7 @@ export async function sendPasswordResetEmail({ to, resetLink }: SendPasswordRese
             </div>
 
             <div style="font-size: 14px; color: #666;">
-              <p style="margin: 0 0 10px 0;">This link will expire in 15 minutes.</p>
+              <p style="margin: 0 0 10px 0;">This link will expire in ${expiresIn}.</p>
               <p style="margin: 0;">If you didn't request a password reset, you can safely ignore this email.</p>
             </div>
 
@@ -194,6 +205,7 @@ export async function sendPasswordResetEmail({ to, resetLink }: SendPasswordRese
     };
 
     const info = await transporter.sendMail(mailOptions);
+    console.info(`Password reset email accepted by SMTP for ${maskEmail(to)}: ${info.messageId}`);
 
     return { success: true, messageId: info.messageId };
   } catch (error) {

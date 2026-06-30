@@ -105,7 +105,10 @@ Required variables:
 - `JWT_SECRET` - Random secret for authentication (generate with `openssl rand -base64 32`)
 - `RESEND_API_KEY` - Resend API key for email verification
 - `EMAIL_FROM` - Sender email address (e.g., "SWAG <onboarding@resend.dev>")
+- `EMAIL_DOMAIN_RESTRICTION_ENABLED` - Set to `"false"` to temporarily allow signup from any email domain
 - `ALLOWED_EMAIL_DOMAINS` - Comma-separated allowed domains (e.g., "vt.edu")
+- `INSTRUCTOR_PASSCODE` - Passcode that creates instructor accounts during signup
+- `ADMINISTRATOR_PASSCODE` - Passcode that creates administrator accounts during signup
 
 **Email Configuration:**
 Using Resend (https://resend.com) for email verification:
@@ -132,10 +135,13 @@ Using Resend (https://resend.com) for email verification:
 **First-time instructors:**
 1. Go to `/instructor/login`
 2. Click "Sign Up" tab
-3. Enter your allowed domain email (configured in `ALLOWED_EMAIL_DOMAINS`)
-4. Check email for verification link (or console in development)
-5. Click link and set your password
-6. Auto-login after password setup
+3. Enter your email address (`ALLOWED_EMAIL_DOMAINS` applies when `EMAIL_DOMAIN_RESTRICTION_ENABLED` is `"true"`)
+4. Enter the instructor or administrator passcode
+5. Check email for verification link (or console in development)
+6. Click link and set your password
+7. Auto-login after password setup
+
+Administrator accounts use the instructor portal and can view assignments and student sessions across all instructors. Editing and deleting remain limited to assignments owned by the signed-in account.
 
 **Returning instructors:**
 - Use "Login" tab with email + password

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, FileText } from 'lucide-react';
 import ReplayClient from './ReplayClient';
-import { getInstructor } from '@/lib/auth';
+import { getInstructor, isAdministrator } from '@/lib/auth';
 
 interface PageProps {
   params: Promise<{ sessionId: string }>;
@@ -29,12 +29,14 @@ export default async function ReplayPage({ params }: PageProps) {
     notFound();
   }
 
-  // Verify instructor owns this assignment
+  // Verify instructor can access this assignment
   const assignment = await db.query.assignments.findFirst({
-    where: and(
-      eq(assignments.id, session.assignmentId),
-      eq(assignments.instructorId, instructor.id)
-    ),
+    where: isAdministrator(instructor)
+      ? eq(assignments.id, session.assignmentId)
+      : and(
+          eq(assignments.id, session.assignmentId),
+          eq(assignments.instructorId, instructor.id)
+        ),
   });
 
   if (!assignment) {
