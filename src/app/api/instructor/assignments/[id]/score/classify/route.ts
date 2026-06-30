@@ -7,6 +7,7 @@ import { getInstructor, isAdministrator } from '@/lib/auth';
 import { ensureScoreTable, getQueryRecords, type QueryRecord } from '@/lib/score/queries';
 import { classifyQuery, isOpenAIConfigured, CLASSIFIER_VERSION } from '@/lib/score/classifier';
 import { getDefaultScoreModel, resolveScoreModel } from '@/lib/score/models';
+import { getScoreConfig } from '@/lib/score/config-store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -131,10 +132,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const classifiedAt = new Date();
   const model = resolveScoreModel(body.model);
+  const config = await getScoreConfig();
 
   await mapWithConcurrency(batch, CONCURRENCY, async (record: QueryRecord) => {
     try {
-      const result = await classifyQuery(record.queryText, record.responseText, model);
+      const result = await classifyQuery(config, record.queryText, record.responseText, model);
       await db
         .insert(scoreClassifications)
         .values({

@@ -6,14 +6,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
 import {
-  SCORE_TAXONOMY,
+  type ScoreConfig,
+  type ScoreConfigSubtype,
   type ScoreTypeKey,
-  getSubtype,
-  subtypeLabel,
-} from '@/lib/score/taxonomy';
+} from '@/lib/score/config';
 import { SCORE_MODELS, SCORE_MODEL_LABELS } from '@/lib/score/models';
-import { SYSTEM_A, SYSTEM_B, buildQueryContent } from '@/lib/score/prompts';
+import { buildSystemA, buildSystemB, buildQueryContent } from '@/lib/score/prompts';
 import { Tooltip } from '@/components/ui/tooltip';
+import TaxonomyEditor from './TaxonomyEditor';
 import {
   ChevronDown,
   ChevronRight,
@@ -24,7 +24,8 @@ import {
   MessageSquare,
   Sparkles,
   Code2,
-  X,
+  Pencil,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 export interface ScoreQueryRow {
@@ -51,6 +52,8 @@ interface ScoreViewerProps {
   classified: number;
   defaultModel: string;
   openaiConfigured: boolean;
+  initialConfig: ScoreConfig;
+  canEditTaxonomy: boolean;
 }
 
 type Classifier = 'A' | 'B';
@@ -59,9 +62,9 @@ type Selection =
   | { kind: 'all' }
   | { kind: 'type'; key: ScoreTypeKey }
   | { kind: 'subtype'; code: string }
-  | { kind: 'combo'; key: string } // B: an exact 2+ tag combination
-  | { kind: 'unclassified' } // A: rows with no type (parse failure)
-  | { kind: 'untagged' }; // B: rows with zero fired tags
+  | { kind: 'combo'; key: string }
+  | { kind: 'unclassified' }
+  | { kind: 'untagged' };
 
 const TYPE_STYLES: Record<ScoreTypeKey, { chip: string; dot: string }> = {
   Planning: { chip: 'bg-blue-50 text-blue-700 border-blue-200', dot: 'bg-blue-500' },
@@ -70,11 +73,12 @@ const TYPE_STYLES: Record<ScoreTypeKey, { chip: string; dot: string }> = {
   All: { chip: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500' },
 };
 const NEUTRAL_CHIP = 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))]';
+// Codes that exist in old classifications but were removed from the taxonomy.
+const ORPHAN_CHIP = 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] border-dashed border-[hsl(var(--border))] line-through opacity-70';
+const TAG_TOOLTIP_ID = 'score-tag-tooltip';
 
-function chipForSubtype(code: string): string {
-  const sub = getSubtype(code);
-  const type = SCORE_TAXONOMY.find((t) => t.subtypes.some((s) => s.code === code))?.key;
-  return sub && type ? TYPE_STYLES[type].chip : NEUTRAL_CHIP;
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function truncate(text: string, n: number): string {
@@ -86,6 +90,48 @@ function comboKey(tags: string[]): string {
   return [...tags].sort().join('+');
 }
 
+// Config-derived lookups (rebuilt whenever the taxonomy config changes).
+interface TaxIndex {
+  typeOf: (code: string) => ScoreTypeKey | undefined;
+  subtypeOf: (code: string) => ScoreConfigSubtype | undefined;
+  labelOf: (code: string) => string;
+  chipClass: (code: string) => string;
+  tooltipHtml: (code: string, score?: number) => string;
+}
+
+function buildIndex(config: ScoreConfig): TaxIndex {
+  const typeMap = new Map<string, ScoreTypeKey>();
+  const subMap = new Map<string, ScoreConfigSubtype>();
+  for (const t of config.types) {
+    for (const s of t.subtypes) {
+      typeMap.set(s.code, t.key);
+      subMap.set(s.code, s);
+    }
+  }
+  return {
+    typeOf: (code) => typeMap.get(code),
+    subtypeOf: (code) => subMap.get(code),
+    labelOf: (code) => {
+      const s = subMap.get(code);
+      return s ? `${s.code} · ${s.label}` : code;
+    },
+    chipClass: (code) => {
+      const k = typeMap.get(code);
+      if (k) return TYPE_STYLES[k].chip;
+      return subMap.has(code) ? NEUTRAL_CHIP : ORPHAN_CHIP;
+    },
+    tooltipHtml: (code, score) => {
+      const s = subMap.get(code);
+      const head = escapeHtml(s ? `${s.code} · ${s.label}` : code);
+      const desc = s
+        ? `<div>${escapeHtml(s.description)}</div>`
+        : '<div style="opacity:.7">⚠ removed from current taxonomy</div>';
+      const sc = score === undefined ? '' : `<div style="opacity:.7;margin-top:2px">Score: ${score}/10</div>`;
+      return `<div style="font-weight:600">${head}</div>${desc}${sc}`;
+    },
+  };
+}
+
 export default function ScoreViewer({
   assignmentId,
   rows,
@@ -93,28 +139,33 @@ export default function ScoreViewer({
   classified,
   defaultModel,
   openaiConfigured,
+  initialConfig,
+  canEditTaxonomy,
 }: ScoreViewerProps) {
   const router = useRouter();
+  const [config, setConfig] = useState<ScoreConfig>(initialConfig);
+  const index = useMemo(() => buildIndex(config), [config]);
+
   const [classifier, setClassifier] = useState<Classifier>('A');
   const [selection, setSelection] = useState<Selection>({ kind: 'all' });
   const [selectedMessageId, setSelectedMessageId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<Set<ScoreTypeKey>>(
-    () => new Set(SCORE_TAXONOMY.map((t) => t.key))
+    () => new Set(config.types.filter((t) => t.subtypes.length > 0).map((t) => t.key))
   );
   const [selectedModel, setSelectedModel] = useState<string>(defaultModel);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorFocusCode, setEditorFocusCode] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<
     'recent' | 'oldest' | 'score-desc' | 'score-asc' | 'participant-asc' | 'participant-desc'
   >('recent');
 
   const remaining = Math.max(0, total - classified);
 
-  // Run state
   const [running, setRunning] = useState(false);
   const [runProgress, setRunProgress] = useState<{ classified: number; total: number; failed: number } | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // Guard against state updates / refresh after the component unmounts mid-run.
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -142,8 +193,6 @@ export default function ScoreViewer({
     return { typeA, subA, subB, unclassifiedA, untaggedB };
   }, [rows]);
 
-  // Multi-tag combinations (2+ tags), only those that actually occur. The point
-  // of Classifier B is to surface genuinely multi-intent queries.
   const combos = useMemo(() => {
     const m = new Map<string, { codes: string[]; count: number }>();
     for (const r of rows) {
@@ -160,7 +209,7 @@ export default function ScoreViewer({
       .sort((a, b) => b.count - a.count || a.codes.length - b.codes.length);
   }, [rows]);
 
-  // ---- Filtered middle column ------------------------------------------
+  // ---- Filtered + sorted middle column ----------------------------------
   const filteredRows = useMemo(() => {
     switch (selection.kind) {
       case 'all':
@@ -182,14 +231,6 @@ export default function ScoreViewer({
     }
   }, [rows, selection, classifier]);
 
-  const selectedRow = useMemo(
-    () => rows.find((r) => r.messageId === selectedMessageId) ?? null,
-    [rows, selectedMessageId]
-  );
-
-  // Middle column ordering. "Score" = the Classifier B 0-10 value relevant to the
-  // current selection (the selected subtype's score; for a combination, the max
-  // across its codes; otherwise the row's strongest signal).
   const sortedRows = useMemo(() => {
     const scoreOf = (r: ScoreQueryRow): number => {
       if (selection.kind === 'subtype') return r.scoresB[selection.code] ?? 0;
@@ -226,9 +267,19 @@ export default function ScoreViewer({
     return arr;
   }, [filteredRows, sortMode, selection]);
 
+  const selectedRow = useMemo(
+    () => rows.find((r) => r.messageId === selectedMessageId) ?? null,
+    [rows, selectedMessageId]
+  );
+
   function switchClassifier(next: Classifier) {
     setClassifier(next);
     setSelection({ kind: 'all' });
+  }
+
+  function openEditor(code: string | null) {
+    setEditorFocusCode(code);
+    setEditorOpen(true);
   }
 
   // ---- Classification runner -------------------------------------------
@@ -241,21 +292,17 @@ export default function ScoreViewer({
     abortRef.current = controller;
     setRunning(true);
     setRunError(null);
-    // On a full re-run the server clears the cache first, so show progress from 0.
     setRunProgress({ classified: force ? 0 : classified, total, failed: 0 });
     let first = true;
     let totalFailed = 0;
     try {
       while (true) {
-        const res = await fetch(
-          `/api/instructor/assignments/${assignmentId}/score/classify`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ force: first && force, limit: 50, model: selectedModel }),
-            signal: controller.signal,
-          }
-        );
+        const res = await fetch(`/api/instructor/assignments/${assignmentId}/score/classify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: first && force, limit: 50, model: selectedModel }),
+          signal: controller.signal,
+        });
         const data = await res.json().catch(() => ({}));
         if (!mountedRef.current) return;
         if (!res.ok) {
@@ -299,6 +346,8 @@ export default function ScoreViewer({
         runError={runError}
         onRun={() => runClassification(false)}
         onRerun={() => runClassification(true)}
+        onEditTaxonomy={() => openEditor(null)}
+        canEditTaxonomy={canEditTaxonomy}
       />
 
       {classified === 0 ? (
@@ -319,16 +368,14 @@ export default function ScoreViewer({
             </button>
 
             {classifier === 'A'
-              ? SCORE_TAXONOMY.map((type) => {
+              ? config.types.map((type) => {
                   const isOpen = expanded.has(type.key);
                   const typeCount = counts.typeA.get(type.key) ?? 0;
                   return (
                     <div key={type.key} className="border-b border-[hsl(var(--border))]">
                       <div
                         className={`flex items-center ${
-                          selection.kind === 'type' && selection.key === type.key
-                            ? 'bg-[hsl(var(--muted))]'
-                            : ''
+                          selection.kind === 'type' && selection.key === type.key ? 'bg-[hsl(var(--muted))]' : ''
                         }`}
                       >
                         <button
@@ -358,59 +405,48 @@ export default function ScoreViewer({
                       </div>
                       {isOpen && (
                         <div className="pb-1">
-                          {type.subtypes.map((s) => {
-                            const c = counts.subA.get(s.code) ?? 0;
-                            const active = selection.kind === 'subtype' && selection.code === s.code;
-                            return (
-                              <button
-                                key={s.code}
-                                onClick={() => setSelection({ kind: 'subtype', code: s.code })}
-                                className={`w-full text-left pl-9 pr-3 py-1.5 text-xs flex items-center justify-between ${
-                                  active ? 'bg-[hsl(var(--muted))] font-medium' : 'hover:bg-[hsl(var(--muted))]/50'
-                                } ${c === 0 ? 'text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--foreground))]'}`}
-                                title={s.description}
-                              >
-                                <span className="truncate">
-                                  <span className="font-mono">{s.code}</span> {s.label}
-                                </span>
-                                <CountBadge n={c} />
-                              </button>
-                            );
-                          })}
+                          {type.subtypes.map((s) => (
+                            <SubtypeRow
+                              key={s.code}
+                              code={s.code}
+                              label={s.label}
+                              count={counts.subA.get(s.code) ?? 0}
+                              description={s.description}
+                              active={selection.kind === 'subtype' && selection.code === s.code}
+                              indent
+                              editable={canEditTaxonomy}
+                              onSelect={() => setSelection({ kind: 'subtype', code: s.code })}
+                              onEdit={() => openEditor(s.code)}
+                            />
+                          ))}
+                          {canEditTaxonomy && <AddSubtypeRow onClick={() => openEditor(null)} />}
                         </div>
                       )}
                     </div>
                   );
                 })
-              : SCORE_TAXONOMY.map((type) => (
+              : config.types.map((type) => (
                   <div key={type.key} className="border-b border-[hsl(var(--border))]">
                     <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[hsl(var(--muted-foreground))] flex items-center gap-2 bg-[hsl(var(--muted))]/30">
                       <span className={`w-2 h-2 rounded-full ${TYPE_STYLES[type.key].dot}`} />
                       {type.label}
                     </div>
-                    {type.subtypes.map((s) => {
-                      const c = counts.subB.get(s.code) ?? 0;
-                      const active = selection.kind === 'subtype' && selection.code === s.code;
-                      return (
-                        <button
-                          key={s.code}
-                          onClick={() => setSelection({ kind: 'subtype', code: s.code })}
-                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between ${
-                            active ? 'bg-[hsl(var(--muted))] font-medium' : 'hover:bg-[hsl(var(--muted))]/50'
-                          } ${c === 0 ? 'text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--foreground))]'}`}
-                          title={s.description}
-                        >
-                          <span className="truncate">
-                            <span className="font-mono">{s.code}</span> {s.label}
-                          </span>
-                          <CountBadge n={c} />
-                        </button>
-                      );
-                    })}
+                    {type.subtypes.map((s) => (
+                      <SubtypeRow
+                        key={s.code}
+                        code={s.code}
+                        label={s.label}
+                        count={counts.subB.get(s.code) ?? 0}
+                        description={s.description}
+                        active={selection.kind === 'subtype' && selection.code === s.code}
+                        editable={canEditTaxonomy}
+                        onSelect={() => setSelection({ kind: 'subtype', code: s.code })}
+                        onEdit={() => openEditor(s.code)}
+                      />
+                    ))}
                   </div>
                 ))}
 
-            {/* Unclassified (A) / Untagged (B) bucket */}
             {classifier === 'A' && counts.unclassifiedA > 0 && (
               <button
                 onClick={() => setSelection({ kind: 'unclassified' })}
@@ -434,7 +470,6 @@ export default function ScoreViewer({
               </button>
             )}
 
-            {/* Multi-tag combinations (B only) */}
             {classifier === 'B' && combos.length > 0 && (
               <div className="border-t-4 border-[hsl(var(--border))]">
                 <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-[hsl(var(--muted-foreground))] bg-[hsl(var(--muted))]/30">
@@ -453,7 +488,7 @@ export default function ScoreViewer({
                     >
                       <span className="flex flex-wrap gap-1">
                         {combo.codes.map((c) => (
-                          <Chip key={c} className={chipForSubtype(c)} tooltipHtml={tagTooltipHtml(c)}>
+                          <Chip key={c} className={index.chipClass(c)} tooltipHtml={index.tooltipHtml(c)}>
                             {c}
                           </Chip>
                         ))}
@@ -470,7 +505,7 @@ export default function ScoreViewer({
           <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-y-auto">
             <div className="sticky top-0 z-10 px-3 py-2 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] flex items-center justify-between gap-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))] truncate">
-                {selectionLabel(selection, classifier, combos)}
+                {selectionLabel(selection, classifier, combos, index)}
               </span>
               <div className="flex items-center gap-2 shrink-0">
                 <select
@@ -511,11 +546,9 @@ export default function ScoreViewer({
                             {new Date(r.queryTimestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </span>
                         </div>
-                        <p className="text-sm text-[hsl(var(--foreground))] leading-snug mb-1.5">
-                          {truncate(r.queryText, 140)}
-                        </p>
+                        <p className="text-sm text-[hsl(var(--foreground))] leading-snug mb-1.5">{truncate(r.queryText, 140)}</p>
                         <div className="flex flex-wrap gap-1">
-                          <RowTags row={r} classifier={classifier} />
+                          <RowTags row={r} classifier={classifier} index={index} />
                         </div>
                       </button>
                     </li>
@@ -537,7 +570,7 @@ export default function ScoreViewer({
                 <div className="flex items-start justify-between gap-2 text-xs text-[hsl(var(--muted-foreground))]">
                   <div className="flex items-center flex-wrap gap-1.5">
                     <span className="font-mono">{selectedRow.participantToken || '—'}</span>
-                    <RowTags row={selectedRow} classifier={classifier} />
+                    <RowTags row={selectedRow} classifier={classifier} index={index} />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span>{new Date(selectedRow.queryTimestamp).toLocaleString()}</span>
@@ -569,7 +602,9 @@ export default function ScoreViewer({
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedRow.responseText}</ReactMarkdown>
                     </div>
                   ) : (
-                    <p className="text-sm text-[hsl(var(--muted-foreground))] italic">No chatbot response was recorded for this query.</p>
+                    <p className="text-sm text-[hsl(var(--muted-foreground))] italic">
+                      No chatbot response was recorded for this query.
+                    </p>
                   )}
                 </section>
               </div>
@@ -583,19 +618,139 @@ export default function ScoreViewer({
           open={previewOpen}
           onClose={() => setPreviewOpen(false)}
           row={selectedRow}
+          config={config}
+          index={index}
           initialClassifier={classifier}
         />
       )}
+
+      <TaxonomyEditor
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        config={config}
+        focusCode={editorFocusCode}
+        onSaved={(next) => {
+          setConfig(next);
+          setExpanded(new Set(next.types.filter((t) => t.subtypes.length > 0).map((t) => t.key)));
+          // If the current selection points at a now-deleted subtype, reset it.
+          if (
+            selection.kind === 'subtype' &&
+            !next.types.some((t) => t.subtypes.some((s) => s.code === selection.code))
+          ) {
+            setSelection({ kind: 'all' });
+          }
+          router.refresh();
+        }}
+      />
 
       <Tooltip id={TAG_TOOLTIP_ID} place="top" className="max-w-xs leading-snug" />
     </div>
   );
 }
 
+function SubtypeRow({
+  code,
+  label,
+  count,
+  description,
+  active,
+  indent,
+  editable,
+  onSelect,
+  onEdit,
+}: {
+  code: string;
+  label: string;
+  count: number;
+  description: string;
+  active: boolean;
+  indent?: boolean;
+  editable?: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+}) {
+  return (
+    <div
+      className={`group flex items-center ${active ? 'bg-[hsl(var(--muted))]' : 'hover:bg-[hsl(var(--muted))]/50'}`}
+      title={description}
+    >
+      <button
+        onClick={onSelect}
+        className={`flex-1 text-left ${indent ? 'pl-9' : 'pl-3'} ${editable ? 'pr-1' : 'pr-3'} py-1.5 text-xs flex items-center justify-between min-w-0 ${
+          active ? 'font-medium text-[hsl(var(--foreground))]' : count === 0 ? 'text-[hsl(var(--muted-foreground))]' : 'text-[hsl(var(--foreground))]'
+        }`}
+      >
+        <span className="truncate">
+          <span className="font-mono">{code}</span> {label}
+        </span>
+        <CountBadge n={count} />
+      </button>
+      {editable && (
+        <button
+          onClick={onEdit}
+          className="opacity-0 group-hover:opacity-100 px-2 py-1.5 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))]"
+          aria-label={`Edit ${code}`}
+          title={`Edit ${code}`}
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddSubtypeRow({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left pl-9 pr-3 py-1 text-[11px] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--primary))]"
+    >
+      + edit subtypes…
+    </button>
+  );
+}
+
+function RowTags({ row, classifier, index }: { row: ScoreQueryRow; classifier: Classifier; index: TaxIndex }) {
+  if (classifier === 'A') {
+    if (row.subtypeA) {
+      return (
+        <Chip className={index.chipClass(row.subtypeA)} tooltipHtml={index.tooltipHtml(row.subtypeA)}>
+          {row.subtypeA}
+        </Chip>
+      );
+    }
+    if (row.typeA) {
+      return (
+        <Chip className={TYPE_STYLES[row.typeA].chip} tooltipHtml={`<div style="font-weight:600">Type · ${row.typeA}</div>`}>
+          {row.typeA}
+        </Chip>
+      );
+    }
+    return <Chip className={NEUTRAL_CHIP}>unclassified</Chip>;
+  }
+  if (row.tagsB.length === 0) {
+    return <Chip className={NEUTRAL_CHIP}>no tags</Chip>;
+  }
+  return (
+    <>
+      {row.tagsB
+        .slice()
+        .sort((a, b) => (row.scoresB[b] ?? 0) - (row.scoresB[a] ?? 0))
+        .map((code) => (
+          <Chip key={code} className={index.chipClass(code)} tooltipHtml={index.tooltipHtml(code, row.scoresB[code])}>
+            {code}
+            <span className="ml-1 font-sans opacity-60">{row.scoresB[code] ?? 0}</span>
+          </Chip>
+        ))}
+    </>
+  );
+}
+
 function selectionLabel(
   selection: Selection,
   classifier: Classifier,
-  combos: { codes: string[]; count: number }[]
+  combos: { codes: string[]; count: number }[],
+  index: TaxIndex
 ): string {
   switch (selection.kind) {
     case 'all':
@@ -603,7 +758,7 @@ function selectionLabel(
     case 'type':
       return `Type · ${selection.key}`;
     case 'subtype':
-      return classifier === 'A' ? subtypeLabel(selection.code) : `Tag · ${subtypeLabel(selection.code)}`;
+      return classifier === 'A' ? index.labelOf(selection.code) : `Tag · ${index.labelOf(selection.code)}`;
     case 'combo': {
       const combo = combos.find((c) => c.codes.join('+') === selection.key);
       return `Combination · ${combo ? combo.codes.join(' + ') : selection.key}`;
@@ -615,18 +770,19 @@ function selectionLabel(
   }
 }
 
-// --------------------------------------------------------------------------
-// Prompt & result preview modal
-// --------------------------------------------------------------------------
 function PromptPreviewModal({
   open,
   onClose,
   row,
+  config,
+  index,
   initialClassifier,
 }: {
   open: boolean;
   onClose: () => void;
   row: ScoreQueryRow;
+  config: ScoreConfig;
+  index: TaxIndex;
   initialClassifier: Classifier;
 }) {
   const [which, setWhich] = useState<Classifier>(initialClassifier);
@@ -634,7 +790,7 @@ function PromptPreviewModal({
     if (open) setWhich(initialClassifier);
   }, [open, initialClassifier]);
 
-  const system = which === 'A' ? SYSTEM_A : SYSTEM_B;
+  const system = which === 'A' ? buildSystemA(config) : buildSystemB(config);
   const user = buildQueryContent(row.queryText, row.responseText);
   const raw = which === 'A' ? row.rawA : row.rawB;
 
@@ -665,32 +821,28 @@ function PromptPreviewModal({
                 ))}
               </div>
               <button onClick={onClose} className="p-1 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]" aria-label="Close">
-                <X className="w-5 h-5" />
+                ✕
               </button>
             </div>
           </div>
 
           <div className="overflow-y-auto px-4 py-3 space-y-4 text-sm">
-            <PreBlock label="System prompt" text={system} />
+            <PreBlock label="System prompt (includes few-shot examples)" text={system} />
             <PreBlock label="User message (query + context)" text={user} />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))] mb-1">
-                Raw model output
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))] mb-1">Raw model output</p>
               {raw ? (
                 <pre className="text-xs whitespace-pre-wrap break-words rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-3 max-h-60 overflow-y-auto">
                   {raw}
                 </pre>
               ) : (
                 <p className="text-xs text-[hsl(var(--muted-foreground))] italic">
-                  Raw output was not stored for this row (classified before raw capture was added). Re-classify to capture it.
+                  Raw output was not stored for this row. Re-classify to capture it.
                 </p>
               )}
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))] mb-1.5">
-                Parsed result
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))] mb-1.5">Parsed result</p>
               {which === 'A' ? (
                 <div className="flex flex-wrap items-center gap-2">
                   {row.typeA ? (
@@ -698,10 +850,10 @@ function PromptPreviewModal({
                   ) : (
                     <Chip className={NEUTRAL_CHIP}>unclassified</Chip>
                   )}
-                  {row.subtypeA && <span className="text-sm">{subtypeLabel(row.subtypeA)}</span>}
+                  {row.subtypeA && <span className="text-sm">{index.labelOf(row.subtypeA)}</span>}
                 </div>
               ) : (
-                <BScores row={row} />
+                <BScores row={row} index={index} />
               )}
             </div>
           </div>
@@ -722,7 +874,7 @@ function PreBlock({ label, text }: { label: string; text: string }) {
   );
 }
 
-function BScores({ row }: { row: ScoreQueryRow }) {
+function BScores({ row, index }: { row: ScoreQueryRow; index: TaxIndex }) {
   const [showAll, setShowAll] = useState(false);
   const entries = Object.entries(row.scoresB)
     .filter(([, v]) => (showAll ? true : v > 0))
@@ -732,8 +884,8 @@ function BScores({ row }: { row: ScoreQueryRow }) {
       <div className="flex flex-wrap gap-1">
         {row.tagsB.length > 0 ? (
           row.tagsB.map((code) => (
-            <Chip key={code} className={chipForSubtype(code)}>
-              {subtypeLabel(code)}
+            <Chip key={code} className={index.chipClass(code)} tooltipHtml={index.tooltipHtml(code, row.scoresB[code])}>
+              {index.labelOf(code)}
             </Chip>
           ))
         ) : (
@@ -754,7 +906,7 @@ function BScores({ row }: { row: ScoreQueryRow }) {
         </div>
       )}
       <button onClick={() => setShowAll((s) => !s)} className="text-xs text-[hsl(var(--primary))] hover:underline">
-        {showAll ? 'Show only scored' : 'Show all 26 scores'}
+        {showAll ? 'Show only scored' : 'Show all scores'}
       </button>
     </div>
   );
@@ -774,6 +926,8 @@ function ControlBar(props: {
   runError: string | null;
   onRun: () => void;
   onRerun: () => void;
+  onEditTaxonomy: () => void;
+  canEditTaxonomy: boolean;
 }) {
   const {
     classifier,
@@ -789,12 +943,13 @@ function ControlBar(props: {
     runError,
     onRun,
     onRerun,
+    onEditTaxonomy,
+    canEditTaxonomy,
   } = props;
   const pct = total > 0 ? Math.round((classified / total) * 100) : 0;
 
   return (
     <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      {/* Classifier toggle */}
       <div className="inline-flex rounded-md border border-[hsl(var(--border))] overflow-hidden self-start">
         <button
           onClick={() => onSwitch('A')}
@@ -818,7 +973,6 @@ function ControlBar(props: {
         </button>
       </div>
 
-      {/* Status + actions */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="text-sm text-[hsl(var(--muted-foreground))]">
           <span className="font-medium text-[hsl(var(--foreground))]">
@@ -830,12 +984,24 @@ function ControlBar(props: {
           )}
         </div>
         {total > 0 && (
-          <div className="w-28 h-1.5 rounded-full bg-[hsl(var(--muted))] overflow-hidden">
-            <div className="h-full bg-[hsl(var(--primary))] transition-all" style={{ width: `${running && runProgress ? Math.round((runProgress.classified / Math.max(1, runProgress.total)) * 100) : pct}%` }} />
+          <div className="w-24 h-1.5 rounded-full bg-[hsl(var(--muted))] overflow-hidden">
+            <div
+              className="h-full bg-[hsl(var(--primary))] transition-all"
+              style={{ width: `${running && runProgress ? Math.round((runProgress.classified / Math.max(1, runProgress.total)) * 100) : pct}%` }}
+            />
           </div>
         )}
 
-        {/* Model picker */}
+        {canEditTaxonomy && (
+          <button
+            onClick={onEditTaxonomy}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm font-medium border border-[hsl(var(--border))] text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+            title="Edit the taxonomy and few-shot examples"
+          >
+            <SlidersHorizontal className="w-4 h-4" /> Taxonomy
+          </button>
+        )}
+
         <label className="flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
           <span className="hidden sm:inline">Model</span>
           <select
@@ -877,9 +1043,7 @@ function ControlBar(props: {
           </button>
         )}
       </div>
-      {runError && (
-        <p className="w-full text-xs text-[hsl(var(--destructive))] sm:order-last">{runError}</p>
-      )}
+      {runError && <p className="w-full text-xs text-[hsl(var(--destructive))] sm:order-last">{runError}</p>}
     </div>
   );
 }
@@ -893,8 +1057,8 @@ function EmptyState({ openaiConfigured, total }: { openaiConfigured: boolean; to
       <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-1">No classifications yet</h2>
       <p className="text-sm text-[hsl(var(--muted-foreground))] max-w-md mx-auto">
         This assignment has <span className="font-medium text-[hsl(var(--foreground))]">{total}</span> student
-        {total === 1 ? ' query' : ' queries'}. Run the classifier to label each one with both the hierarchical (A)
-        and multi-tag (B) schemes, then browse them here.
+        {total === 1 ? ' query' : ' queries'}. Run the classifier to label each one with both the hierarchical (A) and
+        multi-tag (B) schemes, then browse them here.
       </p>
       {!openaiConfigured && (
         <p className="mt-3 inline-flex items-center gap-1 text-xs text-[hsl(var(--destructive))]">
@@ -928,8 +1092,6 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
-const TAG_TOOLTIP_ID = 'score-tag-tooltip';
-
 function Chip({
   children,
   className = '',
@@ -946,59 +1108,5 @@ function Chip({
     >
       {children}
     </span>
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-/** Hover tooltip HTML for a subtype tag: code · label, its description, and (optionally) the score. */
-function tagTooltipHtml(code: string, score?: number): string {
-  const s = getSubtype(code);
-  const head = escapeHtml(s ? `${s.code} · ${s.label}` : code);
-  const desc = s ? `<div>${escapeHtml(s.description)}</div>` : '';
-  const sc = score === undefined ? '' : `<div style="opacity:.7;margin-top:2px">Score: ${score}/10</div>`;
-  return `<div style="font-weight:600">${head}</div>${desc}${sc}`;
-}
-
-/** The classification tag chip(s) for a row, under the active classifier. */
-function RowTags({ row, classifier }: { row: ScoreQueryRow; classifier: Classifier }) {
-  if (classifier === 'A') {
-    if (row.subtypeA) {
-      return (
-        <Chip className={chipForSubtype(row.subtypeA)} tooltipHtml={tagTooltipHtml(row.subtypeA)}>
-          {row.subtypeA}
-        </Chip>
-      );
-    }
-    if (row.typeA) {
-      return (
-        <Chip className={TYPE_STYLES[row.typeA].chip} tooltipHtml={`<div style="font-weight:600">Type · ${row.typeA}</div>`}>
-          {row.typeA}
-        </Chip>
-      );
-    }
-    return <Chip className={NEUTRAL_CHIP}>unclassified</Chip>;
-  }
-  if (row.tagsB.length === 0) {
-    return <Chip className={NEUTRAL_CHIP}>no tags</Chip>;
-  }
-  return (
-    <>
-      {row.tagsB
-        .slice()
-        .sort((a, b) => (row.scoresB[b] ?? 0) - (row.scoresB[a] ?? 0))
-        .map((code) => (
-          <Chip key={code} className={chipForSubtype(code)} tooltipHtml={tagTooltipHtml(code, row.scoresB[code])}>
-            {code}
-            <span className="ml-1 font-sans opacity-60">{row.scoresB[code] ?? 0}</span>
-          </Chip>
-        ))}
-    </>
   );
 }

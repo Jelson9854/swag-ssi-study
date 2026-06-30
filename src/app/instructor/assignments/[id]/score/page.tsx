@@ -10,6 +10,7 @@ import InstructorHeaderActions from '@/components/instructor/InstructorHeaderAct
 import { ensureScoreTable, getQueryRecords } from '@/lib/score/queries';
 import { isOpenAIConfigured } from '@/lib/score/classifier';
 import { getDefaultScoreModel } from '@/lib/score/models';
+import { getScoreConfig } from '@/lib/score/config-store';
 import ScoreViewer, { type ScoreQueryRow } from './ScoreViewer';
 
 interface PageProps {
@@ -34,7 +35,8 @@ export default async function ScorePage({ params }: PageProps) {
 
   await ensureScoreTable();
 
-  const [records, cachedRows, sessions] = await Promise.all([
+  const [config, records, cachedRows, sessions] = await Promise.all([
+    getScoreConfig(),
     getQueryRecords(id),
     db
       .select()
@@ -105,6 +107,8 @@ export default async function ScorePage({ params }: PageProps) {
           classified={classified}
           defaultModel={getDefaultScoreModel()}
           openaiConfigured={isOpenAIConfigured()}
+          initialConfig={config}
+          canEditTaxonomy={isAdministrator(instructor)}
         />
       </main>
     </div>

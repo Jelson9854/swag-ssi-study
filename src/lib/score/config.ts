@@ -1,0 +1,155 @@
+/**
+ * SCORE taxonomy + few-shot config.
+ *
+ * The taxonomy is no longer hardcoded: it is an editable config (4 fixed Types,
+ * each with editable Subtypes that carry a code, label, description, and
+ * few-shot example queries). The config drives BOTH the viewer and the
+ * classifier prompts, is persisted in the DB, and can be exported/imported as
+ * JSON. Client-safe (no server/openai imports).
+ *
+ * The four Type keys are fixed (their colors/grouping depend on them); subtypes
+ * within each type are fully editable / add / delete.
+ */
+
+export type ScoreTypeKey = 'Planning' | 'Translating' | 'Reviewing' | 'All';
+
+export const SCORE_TYPE_KEYS: ScoreTypeKey[] = ['Planning', 'Translating', 'Reviewing', 'All'];
+
+export const SCORE_CONFIG_VERSION = 1;
+
+/** Cap few-shot examples per subtype so an import/edit can't blow up the prompt. */
+export const MAX_EXAMPLES_PER_SUBTYPE = 20;
+
+export interface ScoreConfigSubtype {
+  code: string;
+  label: string;
+  description: string;
+  examples: string[];
+}
+
+export interface ScoreConfigType {
+  key: ScoreTypeKey;
+  letter: string; // P / T / R / A
+  label: string;
+  description: string;
+  subtypes: ScoreConfigSubtype[];
+}
+
+export interface ScoreConfig {
+  version: number;
+  types: ScoreConfigType[];
+}
+
+export function isValidTypeKey(key: string | null | undefined): key is ScoreTypeKey {
+  return key === 'Planning' || key === 'Translating' || key === 'Reviewing' || key === 'All';
+}
+
+export function flattenSubtypes(
+  config: ScoreConfig
+): { type: ScoreConfigType; subtype: ScoreConfigSubtype }[] {
+  return config.types.flatMap((type) => type.subtypes.map((subtype) => ({ type, subtype })));
+}
+
+export function allCodes(config: ScoreConfig): string[] {
+  return config.types.flatMap((t) => t.subtypes.map((s) => s.code));
+}
+
+export function getSubtypeFromConfig(
+  config: ScoreConfig,
+  code: string | null | undefined
+): ScoreConfigSubtype | undefined {
+  if (!code) return undefined;
+  for (const t of config.types) {
+    for (const s of t.subtypes) {
+      if (s.code === code) return s;
+    }
+  }
+  return undefined;
+}
+
+export function typeKeyOfCode(
+  config: ScoreConfig,
+  code: string | null | undefined
+): ScoreTypeKey | undefined {
+  if (!code) return undefined;
+  for (const t of config.types) {
+    if (t.subtypes.some((s) => s.code === code)) return t.key;
+  }
+  return undefined;
+}
+
+export function isValidCode(config: ScoreConfig, code: string | null | undefined): boolean {
+  return !!getSubtypeFromConfig(config, code);
+}
+
+/** "PL01 · Information Search" — falls back to the bare code if unknown. */
+export function subtypeLabelOf(config: ScoreConfig, code: string): string {
+  const s = getSubtypeFromConfig(config, code);
+  return s ? `${s.code} · ${s.label}` : code;
+}
+
+/**
+ * Validate + coerce an arbitrary parsed JSON object into a ScoreConfig (for
+ * import). Returns null if it is not recognizably a config. Lenient about extra
+ * fields; strict about the required shape.
+ */
+export function normalizeConfig(raw: unknown): ScoreConfig | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const typesRaw = obj.types;
+  if (!Array.isArray(typesRaw)) return null;
+
+  const types: ScoreConfigType[] = [];
+  const seenCodes = new Set<string>();
+
+  for (const t of typesRaw) {
+    if (!t || typeof t !== 'object') continue;
+    const tt = t as Record<string, unknown>;
+    if (!isValidTypeKey(tt.key as string)) continue;
+    const key = tt.key as ScoreTypeKey;
+    const subtypesRaw = Array.isArray(tt.subtypes) ? tt.subtypes : [];
+    const subtypes: ScoreConfigSubtype[] = [];
+    for (const s of subtypesRaw) {
+      if (!s || typeof s !== 'object') continue;
+      const ss = s as Record<string, unknown>;
+      // Codes are normalized to uppercase so they match the LLM-returned codes
+      // (classifyA uppercases) and lookups everywhere.
+      const code = typeof ss.code === 'string' ? ss.code.trim().toUpperCase() : '';
+      if (!code || seenCodes.has(code)) continue; // codes must be unique & non-empty
+      seenCodes.add(code);
+      const label = typeof ss.label === 'string' ? ss.label : code;
+      const description = typeof ss.description === 'string' ? ss.description : label;
+      const examples = Array.isArray(ss.examples)
+        ? ss.examples
+            .filter((e): e is string => typeof e === 'string')
+            .map((e) => e.trim())
+            .filter(Boolean)
+            .slice(0, MAX_EXAMPLES_PER_SUBTYPE)
+        : [];
+      subtypes.push({ code, label, description, examples });
+    }
+    types.push({
+      key,
+      letter: typeof tt.letter === 'string' ? tt.letter : key[0],
+      label: typeof tt.label === 'string' ? tt.label : key,
+      description: typeof tt.description === 'string' ? tt.description : '',
+      subtypes,
+    });
+  }
+
+  // Ensure all four types exist (preserve order Planning/Translating/Reviewing/All).
+  const byKey = new Map(types.map((t) => [t.key, t]));
+  const ordered: ScoreConfigType[] = SCORE_TYPE_KEYS.map(
+    (key) =>
+      byKey.get(key) ?? {
+        key,
+        letter: key[0],
+        label: key,
+        description: '',
+        subtypes: [],
+      }
+  );
+
+  if (ordered.every((t) => t.subtypes.length === 0)) return null; // nothing usable
+  return { version: SCORE_CONFIG_VERSION, types: ordered };
+}

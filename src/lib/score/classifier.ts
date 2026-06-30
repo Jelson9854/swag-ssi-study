@@ -13,14 +13,15 @@
  */
 import OpenAI from 'openai';
 import { resolveScoreModel } from './models';
-import { SYSTEM_A, SYSTEM_B, buildQueryContent } from './prompts';
+import { buildSystemA, buildSystemB, buildQueryContent } from './prompts';
 import {
-  SCORE_SUBTYPE_CODES,
+  type ScoreConfig,
   type ScoreTypeKey,
   isValidTypeKey,
-  isValidSubtypeCode,
-  getTypeOfSubtype,
-} from './taxonomy';
+  isValidCode,
+  typeKeyOfCode,
+  allCodes,
+} from './config';
 
 export const CLASSIFIER_VERSION = 1;
 /** A subtype "fires" in Classifier B when its 0-10 score is at least this. */
@@ -123,22 +124,23 @@ function extractJsonObject(text: string): Record<string, unknown> {
 // Classifier A — hierarchical single-label
 // --------------------------------------------------------------------------
 export async function classifyA(
+  config: ScoreConfig,
   queryText: string,
   responseText: string | null,
   model: string
 ): Promise<{ result: ClassifierAResult; raw: string }> {
-  const raw = await callModel(SYSTEM_A, buildQueryContent(queryText, responseText), model);
+  const raw = await callModel(buildSystemA(config), buildQueryContent(queryText, responseText), model);
   const parsed = extractJsonObject(raw);
 
   let type = typeof parsed.type === 'string' ? (parsed.type as string) : null;
   let subtype = typeof parsed.subtype === 'string' ? (parsed.subtype as string).toUpperCase().trim() : null;
 
-  if (subtype && !isValidSubtypeCode(subtype)) {
+  if (subtype && !isValidCode(config, subtype)) {
     subtype = null;
   }
   // Trust the subtype's own type if present; reconcile a mismatched/invalid type.
   if (subtype) {
-    type = getTypeOfSubtype(subtype) ?? null;
+    type = typeKeyOfCode(config, subtype) ?? null;
   } else if (!isValidTypeKey(type)) {
     type = null;
   }
@@ -150,35 +152,38 @@ export async function classifyA(
 // Classifier B — per-subtype binary multi-tag (0-10 scores)
 // --------------------------------------------------------------------------
 export async function classifyB(
+  config: ScoreConfig,
   queryText: string,
   responseText: string | null,
   model: string
 ): Promise<{ result: ClassifierBResult; raw: string }> {
-  const raw = await callModel(SYSTEM_B, buildQueryContent(queryText, responseText), model);
+  const raw = await callModel(buildSystemB(config), buildQueryContent(queryText, responseText), model);
   const parsed = extractJsonObject(raw);
 
+  const codes = allCodes(config);
   const scores: Record<string, number> = {};
-  for (const code of SCORE_SUBTYPE_CODES) {
+  for (const code of codes) {
     const value = parsed[code];
     let n = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(n)) n = 0;
     n = Math.max(0, Math.min(10, Math.round(n)));
     scores[code] = n;
   }
-  const tags = SCORE_SUBTYPE_CODES.filter((code) => scores[code] >= SCORE_B_THRESHOLD);
+  const tags = codes.filter((code) => scores[code] >= SCORE_B_THRESHOLD);
   return { result: { tags, scores }, raw };
 }
 
 /** Run both classifiers for one query. Independent calls, run in parallel. */
 export async function classifyQuery(
+  config: ScoreConfig,
   queryText: string,
   responseText: string | null,
   model?: string
 ): Promise<QueryClassification> {
   const resolved = resolveScoreModel(model);
   const [a, b] = await Promise.all([
-    classifyA(queryText, responseText, resolved),
-    classifyB(queryText, responseText, resolved),
+    classifyA(config, queryText, responseText, resolved),
+    classifyB(config, queryText, responseText, resolved),
   ]);
   return { a: a.result, b: b.result, rawA: a.raw, rawB: b.raw, model: resolved };
 }

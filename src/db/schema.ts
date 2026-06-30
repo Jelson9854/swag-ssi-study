@@ -125,6 +125,14 @@ export const scoreClassifications = pgTable('score_classifications', {
   messageUnique: uniqueIndex('score_classifications_message_unique').on(table.messageId),
 }));
 
+// SCORE — editable taxonomy + few-shot config (singleton row, id='default').
+// Drives both the viewer and the classifier prompts. See src/lib/score/config.ts.
+export const scoreConfig = pgTable('score_config', {
+  id: text('id').primaryKey(),
+  config: jsonb('config').notNull(), // ScoreConfig
+  updatedAt: timestamp('updated_at').notNull(),
+});
+
 // TypeScript types
 export type Assignment = typeof assignments.$inferSelect;
 export type NewAssignment = typeof assignments.$inferInsert;
@@ -149,3 +157,6 @@ export type NewAuthToken = typeof authTokens.$inferInsert;
 
 export type ScoreClassification = typeof scoreClassifications.$inferSelect;
 export type NewScoreClassification = typeof scoreClassifications.$inferInsert;
+
+export type ScoreConfigRow = typeof scoreConfig.$inferSelect;
+export type NewScoreConfigRow = typeof scoreConfig.$inferInsert;
