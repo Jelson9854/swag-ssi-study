@@ -17,7 +17,7 @@ if (!connectionString && typeof window === 'undefined') {
 
 const client = postgres(connectionString || 'postgresql://dummy@localhost/dummy', {
   // Lazy connection: only connect when actually querying
-  max: 10,
+  max: 20,
   idle_timeout: 20,
   connect_timeout: 10,
 });

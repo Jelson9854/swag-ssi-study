@@ -5,7 +5,7 @@ import { headers } from 'next/headers';
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, Edit2 } from 'lucide-react';
+import { ChevronLeft, Edit2, BarChart3 } from 'lucide-react';
 import AssignmentTabs from './AssignmentTabs';
 import { getInstructor, isAdministrator } from '@/lib/auth';
 import InstructorHeaderActions from '@/components/instructor/InstructorHeaderActions';
@@ -138,6 +138,12 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <Link href={`/instructor/assignments/${id}/score`}>
+                <Button variant="outline">
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  SCORE
+                </Button>
+              </Link>
               {canEdit && (
                 <Link href={`/instructor/assignments/${id}/edit`}>
                   <Button variant="outline">

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, serial, jsonb, index, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, serial, jsonb, index, uniqueIndex, integer } from 'drizzle-orm/pg-core';
 import { DEFAULT_ASSIGNMENT_AI_GUIDANCE } from '../lib/assignment-ai';
 
 // Instructor table for Phase 2
@@ -91,6 +91,40 @@ export const chatMessages = pgTable('chat_messages', {
   sequenceNumber: integer('sequence_number').notNull(),
 });
 
+// SCORE — cached intent classifications of student->chatbot queries.
+// One row per "query" (a single student message + its chatbot response),
+// holding the results of BOTH classifiers so the viewer can compare them.
+// See docs/SCORE_viewer_spec.md and src/lib/score/.
+export const scoreClassifications = pgTable('score_classifications', {
+  id: serial('id').primaryKey(),
+  assignmentId: text('assignment_id').notNull().references(() => assignments.id),
+  // The student (user) chat message this classification is about.
+  messageId: integer('message_id').notNull().references(() => chatMessages.id),
+  conversationId: text('conversation_id').notNull().references(() => chatConversations.id),
+  sessionId: text('session_id').notNull().references(() => studentSessions.id),
+  // Snapshot of the Q-A pair at classification time (the response is the most
+  // recent chatbot reply that followed the query within the same conversation).
+  queryText: text('query_text').notNull(),
+  responseText: text('response_text'),
+  turnIndex: integer('turn_index').notNull(), // sequenceNumber of the user message
+  queryTimestamp: timestamp('query_timestamp').notNull(),
+  // Classifier A — Hierarchical single-label: exactly one Type + one Subtype.
+  typeA: text('type_a'), // 'Planning' | 'Translating' | 'Reviewing' | 'All'
+  subtypeA: text('subtype_a'), // e.g. 'PL01'
+  // Classifier B — Per-subtype binary multi-tag.
+  subtypeTagsB: jsonb('subtype_tags_b'), // string[] of subtype codes that fired
+  subtypeScoresB: jsonb('subtype_scores_b'), // Record<subtypeCode, 0-10 score>
+  // Raw model output for each classifier (for the prompt/result preview modal).
+  rawResponseA: text('raw_response_a'),
+  rawResponseB: text('raw_response_b'),
+  model: text('model'),
+  classifierVersion: integer('classifier_version').notNull().default(1),
+  classifiedAt: timestamp('classified_at').notNull(),
+}, (table) => ({
+  assignmentIdx: index('score_classifications_assignment_idx').on(table.assignmentId),
+  messageUnique: uniqueIndex('score_classifications_message_unique').on(table.messageId),
+}));
+
 // TypeScript types
 export type Assignment = typeof assignments.$inferSelect;
 export type NewAssignment = typeof assignments.$inferInsert;
@@ -112,3 +146,6 @@ export type NewInstructor = typeof instructors.$inferInsert;
 
 export type AuthToken = typeof authTokens.$inferSelect;
 export type NewAuthToken = typeof authTokens.$inferInsert;
+
+export type ScoreClassification = typeof scoreClassifications.$inferSelect;
+export type NewScoreClassification = typeof scoreClassifications.$inferInsert;
