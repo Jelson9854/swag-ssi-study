@@ -24,7 +24,6 @@ interface EditorClientProps {
   assignmentTitle: string;
   assignmentInstructions: string;
   assignmentCriteria: string | null;
-  deadline: Date;
   allowWebSearch: boolean;
   strictPasteBlocking: boolean;
 }
@@ -35,7 +34,6 @@ export default function EditorClient({
   assignmentTitle,
   assignmentInstructions,
   assignmentCriteria,
-  deadline,
   allowWebSearch,
   strictPasteBlocking,
 }: EditorClientProps) {
@@ -219,9 +217,6 @@ export default function EditorClient({
                 {assignmentTitle}
               </h1>
               <div className="flex items-center gap-3 mt-1">
-                <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                  Due: {deadline.toLocaleDateString()}
-                </p>
                 <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
                   strictPasteBlocking
                     ? 'border-red-200 bg-red-50 text-red-700'
@@ -234,7 +229,11 @@ export default function EditorClient({
                   onClick={toggleInstructions}
                   variant="ghost"
                   size="sm"
-                  className="h-auto p-0 text-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]/80 font-medium hover:bg-transparent"
+                  className={`h-auto p-0 font-medium hover:bg-transparent ${
+                    showInstructions
+                      ? 'text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]/80'
+                      : 'text-[hsl(var(--primary))] hover:text-[hsl(var(--primary))]/80'
+                  }`}
                 >
                   <FileText className="w-4 h-4 mr-1" />
                   {showInstructions ? 'Hide Instructions' : 'View Instructions'}
@@ -309,7 +308,7 @@ export default function EditorClient({
               onClick={() => window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.SUBMIT_REQUEST))}
               className={hasChangesAfterSubmit ? "" : "opacity-50 cursor-not-allowed"}
               disabled={!hasChangesAfterSubmit}
-              title={hasChangesAfterSubmit ? "You can resubmit anytime before the deadline" : "No changes since last submission"}
+              title={hasChangesAfterSubmit ? "You can resubmit anytime" : "No changes since last submission"}
               size="sm"
             >
               <Send className="w-4 h-4 mr-2" />
@@ -375,7 +374,7 @@ export default function EditorClient({
         {/* Resize Handle - only show when chat is open */}
         {isChatOpen && (
           <div
-            className="w-2 shrink-0 cursor-col-resize flex items-center justify-center hover:bg-[hsl(var(--primary))]/10 transition-colors group"
+            className="w-2 shrink-0 cursor-col-resize flex items-center justify-center border-l-2 border-[hsl(var(--border))] hover:bg-[hsl(var(--primary))]/10 transition-colors group"
             onMouseDown={startResize}
           >
             <div className="h-10 w-1 rounded-full bg-[hsl(var(--border))] group-hover:bg-[hsl(var(--primary))]/50 transition-colors" />
@@ -384,7 +383,7 @@ export default function EditorClient({
 
         {/* Chat (Right) - only show when open */}
         {isChatOpen && (
-          <div className="bg-[hsl(var(--muted))]/10" style={{ width: `${chatWidth}px` }}>
+          <div className="bg-[hsl(var(--muted))]/10 shadow-[-2px_0_8px_-2px_rgba(0,0,0,0.08)]" style={{ width: `${chatWidth}px` }}>
             <ChatPanel
               sessionId={sessionId}
               assignmentId={assignmentId}

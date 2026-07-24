@@ -37,7 +37,6 @@ export default function NewAssignmentPage() {
       title: formData.get('title') as string,
       instructions: instructions,
       criteria: useCriteria && trimmedCriteria ? criteria : null,
-      deadline: formData.get('deadline') as string,
       customSystemPrompt: resolveAssignmentAiGuidance(formData.get('customSystemPrompt') as string | null),
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
@@ -64,16 +63,6 @@ export default function NewAssignmentPage() {
       setIsSubmitting(false);
     }
   }
-
-  // Default deadline: 7 days from now at 11:59 PM (local time)
-  const defaultDeadlineDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  defaultDeadlineDate.setHours(23, 59, 0, 0);
-  const year = defaultDeadlineDate.getFullYear();
-  const month = String(defaultDeadlineDate.getMonth() + 1).padStart(2, '0');
-  const day = String(defaultDeadlineDate.getDate()).padStart(2, '0');
-  const hours = String(defaultDeadlineDate.getHours()).padStart(2, '0');
-  const minutes = String(defaultDeadlineDate.getMinutes()).padStart(2, '0');
-  const defaultDeadline = `${year}-${month}-${day}T${hours}:${minutes}`;
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -175,21 +164,6 @@ export default function NewAssignmentPage() {
                 ) : null}
               </div>
 
-              {/* Deadline */}
-              <div className="space-y-2">
-                <label htmlFor="deadline" className="text-sm font-medium text-[hsl(var(--foreground))]">
-                  Deadline <span className="text-[hsl(var(--destructive))]">*</span>
-                </label>
-                <div className="w-full sm:w-1/2">
-                  <Input
-                    type="datetime-local"
-                    id="deadline"
-                    name="deadline"
-                    required
-                    defaultValue={defaultDeadline}
-                  />
-                </div>
-              </div>
             </CardContent>
           </Card>
 

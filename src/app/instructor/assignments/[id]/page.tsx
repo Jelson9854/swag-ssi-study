@@ -112,7 +112,6 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
   }));
 
   const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
-  const isOverdue = new Date(assignment.deadline) < new Date();
   const canEdit = assignment.instructorId === instructor.id;
   const normalizedAssignment = {
     ...assignment,
@@ -132,10 +131,6 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
             </Link>
             <div className="flex-1">
               <h1 className="text-xl font-bold font-heading text-[hsl(var(--foreground))]">{assignment.title}</h1>
-              <p className={`text-sm ${isOverdue ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--muted-foreground))]'}`}>
-                Deadline: {new Date(assignment.deadline).toLocaleString()}
-                {isOverdue && ' (Overdue)'}
-              </p>
             </div>
             <div className="flex items-center gap-2">
               <Link href={`/instructor/assignments/${id}/score`}>

@@ -1,5 +1,5 @@
 export const DEFAULT_ASSIGNMENT_AI_GUIDANCE =
-  'You are a supportive writing coach for students. Help them brainstorm, organize ideas, revise for clarity, and improve grammar. Do not write the full assignment for them. Keep feedback practical, brief, and focused on helping the student produce original work.';
+  'This is the scenario, keep it in mind, your job to help the participant do research and with reasoning. Let them come up with the arguments.';
 
 export const ASSIGNMENT_AI_GUIDANCE_EXAMPLES = [
   'Do not write the full essay for the student.',
@@ -50,8 +50,8 @@ export function buildAssignmentAiGuidance({
  * empty: it inserts customSystemPrompt: '' to reproduce a chatbot that ran with
  * no system prompt. Every assignment saved through the UI is non-empty — the
  * edit form marks guidance required, the save routes coerce blank → default via
- * resolveAssignmentAiGuidance, and the DB column defaults to the writing-coach
- * prompt. Honoring empty-as-empty keeps the chatbot, the "How the AI helps"
+ * resolveAssignmentAiGuidance, and the DB column defaults to
+ * DEFAULT_ASSIGNMENT_AI_GUIDANCE. Honoring empty-as-empty keeps the chatbot, the "How the AI helps"
  * tab, and every SCORE preview/deploy starting from the SAME baseline.
  */
 export function assignmentBasePrompt(assignment: {

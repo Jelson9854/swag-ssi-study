@@ -26,7 +26,6 @@ export async function POST(request: Request) {
       title,
       instructions,
       criteria,
-      deadline,
       customSystemPrompt,
       includeInstructionInPrompt,
       allowWebSearch,
@@ -34,18 +33,9 @@ export async function POST(request: Request) {
     } = body;
 
     // Validate required fields
-    if (!title || !instructions || !deadline) {
+    if (!title || !instructions) {
       return NextResponse.json(
-        { error: 'Title, instructions, and deadline are required' },
-        { status: 400 }
-      );
-    }
-
-    // Parse deadline
-    const deadlineDate = new Date(deadline);
-    if (isNaN(deadlineDate.getTime())) {
-      return NextResponse.json(
-        { error: 'Invalid deadline format' },
+        { error: 'Title and instructions are required' },
         { status: 400 }
       );
     }
@@ -65,7 +55,6 @@ export async function POST(request: Request) {
       title,
       instructions,
       criteria: typeof criteria === 'string' && criteria.trim() ? criteria : null,
-      deadline: deadlineDate,
       shareToken,
       instructorId: instructor.id,
       customSystemPrompt: resolveAssignmentAiGuidance(customSystemPrompt),

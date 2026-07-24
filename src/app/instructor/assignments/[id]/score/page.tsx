@@ -196,7 +196,7 @@ export default async function ScorePage({ params }: PageProps) {
                 SCORE · <span className="font-normal">{assignment.title}</span>
               </h1>
               <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                Organize · Revise · Evaluate — instructor intents own the log
+                Organize · Revise · Evaluate — researcher intents own the log
               </p>
             </div>
             <span

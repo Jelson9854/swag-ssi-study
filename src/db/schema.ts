@@ -33,7 +33,6 @@ export const assignments = pgTable('assignments', {
   title: text('title').notNull(),
   instructions: text('instructions').notNull(),
   criteria: text('criteria'),
-  deadline: timestamp('deadline').notNull(),
   shareToken: text('share_token').unique().notNull(),
   // Phase 2 fields
   instructorId: text('instructor_id'), // nullable for Phase 1

@@ -68,7 +68,6 @@ export async function PUT(request: Request, { params }: RouteParams) {
       title,
       instructions,
       criteria,
-      deadline,
       customSystemPrompt,
       includeInstructionInPrompt,
       allowWebSearch,
@@ -76,17 +75,11 @@ export async function PUT(request: Request, { params }: RouteParams) {
     } = body;
 
     // Validate required fields
-    if (!title || !instructions || !deadline) {
+    if (!title || !instructions) {
       return NextResponse.json(
-        { error: 'Title, instructions, and deadline are required' },
+        { error: 'Title and instructions are required' },
         { status: 400 }
       );
-    }
-
-    // Parse deadline
-    const deadlineDate = new Date(deadline);
-    if (isNaN(deadlineDate.getTime())) {
-      return NextResponse.json({ error: 'Invalid deadline format' }, { status: 400 });
     }
 
     // Update assignment
@@ -96,7 +89,6 @@ export async function PUT(request: Request, { params }: RouteParams) {
         title,
         instructions,
         criteria: typeof criteria === 'string' && criteria.trim() ? criteria : null,
-        deadline: deadlineDate,
         customSystemPrompt: resolveAssignmentAiGuidance(customSystemPrompt),
         includeInstructionInPrompt: includeInstructionInPrompt || false,
         allowWebSearch: allowWebSearch || false,

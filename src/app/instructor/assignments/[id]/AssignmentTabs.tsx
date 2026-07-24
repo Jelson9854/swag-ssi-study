@@ -14,7 +14,6 @@ interface Assignment {
   criteria: string | null;
   customSystemPrompt: string | null;
   includeInstructionInPrompt: boolean;
-  deadline: Date;
   shareToken: string;
 }
 

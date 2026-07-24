@@ -473,7 +473,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
         tracker.trackSubmission(documentState);
         await tracker.forceSave();
         window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.SUBMISSION_SAVED));
-        toast.success("Submitted! You can resubmit anytime before the deadline.", {
+        toast.success("Submitted! You can resubmit anytime.", {
           duration: 3000,
           position: "top-center",
         });

@@ -3,12 +3,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
-import { Plus, X, Globe, ChevronDown, Check } from 'lucide-react';
+import { X, Globe, ChevronDown, Check, Sparkles } from 'lucide-react';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import { getSessionEventTracker } from '@/lib/event-tracker';
 import toast, { Toaster } from 'react-hot-toast';
 import ConversationList from './ConversationList';
 import ChatMessages from './ChatMessages';
+import AssignmentChatSwitcher from './AssignmentChatSwitcher';
 import type { ReplayPasteHighlight } from './replayPasteHighlight';
 import { useChatStore, type Conversation, type Message } from '@/stores/chatStore';
 
@@ -53,6 +54,7 @@ function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const validator = getGlobalValidator();
   const [replayActiveConversationId, setReplayActiveConversationId] = useState<'all' | string>('all');
+  const [isViewingOtherAssignment, setIsViewingOtherAssignment] = useState(false);
   const tracker = useMemo(
     () => (sessionId ? getSessionEventTracker(sessionId) : null),
     [sessionId]
@@ -66,7 +68,6 @@ function ChatPanel({
     messages,
     input,
     isLoading,
-    isCreatingConversation,
     webSearchEnabled,
     setMode,
     setActiveConversationId,
@@ -345,12 +346,6 @@ function ChatPanel({
     });
   };
 
-  const handleCreateConversation = () => {
-    if (sessionId) {
-      createConversation(sessionId);
-    }
-  };
-
   const handleDeleteConversation = async (conversationId: string) => {
     await deleteConversation(conversationId);
 
@@ -375,23 +370,14 @@ function ChatPanel({
       />
 
       {/* Chat panel - always rendered for smooth animation */}
-      <div className="flex flex-col h-full bg-[hsl(var(--background))]">
+      <div className="flex flex-col h-full bg-[hsl(var(--background))] ring-1 ring-inset ring-[hsl(var(--border))]">
         {/* Header with New Conversation and Close buttons */}
         <div className="flex h-10 items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4">
-          <h3 className="font-semibold text-[hsl(var(--foreground))]">Chat</h3>
+          <h3 className="flex items-center gap-1.5 font-semibold text-[hsl(var(--foreground))]">
+            <Sparkles className="w-4 h-4 text-[hsl(var(--primary))]" />
+            Chat
+          </h3>
           <div className="flex items-center gap-2">
-            {/* New conversation button - only show in live mode */}
-            {!isReplayMode && (
-              <Button
-                onClick={handleCreateConversation}
-                disabled={isCreatingConversation}
-                variant="ghost"
-                size="icon"
-                title="New conversation"
-              >
-                <Plus className="w-5 h-5" />
-              </Button>
-            )}
             <Button
               onClick={() => onToggle(false)}
               variant="ghost"
@@ -402,6 +388,14 @@ function ChatPanel({
             </Button>
           </div>
         </div>
+
+        {/* Assignment switcher - view other assignments' chats read-only, live mode only */}
+        {!isReplayMode && (
+          <AssignmentChatSwitcher
+            currentAssignmentId={assignmentId}
+            onViewingChange={setIsViewingOtherAssignment}
+          />
+        )}
 
         {/* Conversation filter - show in replay mode when there are conversations */}
         {isReplayMode && shownConversations.length > 0 && (
@@ -455,31 +449,36 @@ function ChatPanel({
           </div>
         )}
 
-        {/* Conversation List (collapsible) - only show in live mode */}
-        {!isReplayMode && conversations.length > 1 && (
-          <ConversationList
-            conversations={conversations}
-            activeConversationId={activeConversationId}
-            onSelectConversation={setActiveConversationId}
-            onUpdateTitle={updateConversationTitle}
-            onDeleteConversation={handleDeleteConversation}
-          />
+        {!isViewingOtherAssignment && (
+          <>
+            {/* Conversation List (collapsible) - only show in live mode */}
+            {!isReplayMode && conversations.length > 1 && (
+              <ConversationList
+                conversations={conversations}
+                activeConversationId={activeConversationId}
+                onSelectConversation={setActiveConversationId}
+                onUpdateTitle={updateConversationTitle}
+                onDeleteConversation={handleDeleteConversation}
+              />
+            )}
+
+            {/* Chat Messages */}
+            <ChatMessages
+              messages={shownMessages}
+              isLoading={isReplayMode ? false : isLoading}
+              showConversationBadge={isReplayMode && shownActiveConversationId === 'all'}
+              showTimestamp={isReplayMode}
+              enableCopy={!isReplayMode}
+              showWebSearchIndicator={isReplayMode}
+              highlightedMessageId={highlightedMessageId}
+              replayPasteHighlights={isReplayMode ? replayPasteHighlights : []}
+              onReplayPasteClick={isReplayMode ? onReplayPasteClick : undefined}
+            />
+          </>
         )}
 
-        {/* Chat Messages */}
-        <ChatMessages
-          messages={shownMessages}
-          isLoading={isReplayMode ? false : isLoading}
-          showConversationBadge={isReplayMode && shownActiveConversationId === 'all'}
-          showTimestamp={isReplayMode}
-          enableCopy={!isReplayMode}
-          showWebSearchIndicator={isReplayMode}
-          highlightedMessageId={highlightedMessageId}
-          replayPasteHighlights={isReplayMode ? replayPasteHighlights : []}
-          onReplayPasteClick={isReplayMode ? onReplayPasteClick : undefined}
-        />
-
         {/* Input */}
+        {!isViewingOtherAssignment && (
         <div className="p-4 bg-[hsl(var(--muted))]/10 border-t border-[hsl(var(--border))]">
           <form onSubmit={isReplayMode ? (e) => e.preventDefault() : handleSubmit}>
               {/* ChatGPT-style input container */}
@@ -582,6 +581,7 @@ function ChatPanel({
               </div>
           </form>
         </div>
+        )}
       </div>
     </>
   );

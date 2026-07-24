@@ -7,6 +7,7 @@ import { cookies } from 'next/headers';
 import { Card } from '@/components/ui/card';
 import EmptyStateCard from '@/components/ui/EmptyStateCard';
 import { Button } from '@/components/ui/button';
+import ParticipantHeaderActions from '@/components/student/ParticipantHeaderActions';
 
 export default async function ParticipantAssignmentsPage() {
   const cookieStore = await cookies();
@@ -20,7 +21,6 @@ export default async function ParticipantAssignmentsPage() {
     .select({
       assignmentId: assignments.id,
       title: assignments.title,
-      deadline: assignments.deadline,
       shareToken: assignments.shareToken,
     })
     .from(assignments)
@@ -81,7 +81,7 @@ export default async function ParticipantAssignmentsPage() {
               <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">SWAG</h1>
               <p className="text-sm text-[hsl(var(--muted-foreground))]">Participant Dashboard</p>
             </div>
-            <span className="text-sm text-[hsl(var(--muted-foreground))]">{pid}</span>
+            <ParticipantHeaderActions pid={pid} />
           </div>
         </div>
       </header>
@@ -108,9 +108,6 @@ export default async function ParticipantAssignmentsPage() {
                         Title
                       </th>
                       <th className="px-6 py-3 font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider text-xs">
-                        Deadline
-                      </th>
-                      <th className="px-6 py-3 font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider text-xs">
                         Last Active
                       </th>
                       <th className="px-6 py-3 font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider text-xs">
@@ -123,17 +120,10 @@ export default async function ParticipantAssignmentsPage() {
                   </thead>
                   <tbody className="divide-y divide-[hsl(var(--border))]">
                     {rows.map((row) => {
-                      const isOverdue = new Date(row.deadline) < new Date();
                       return (
                         <tr key={row.assignmentId} className="group hover:bg-[hsl(var(--muted)/0.3)] transition-colors">
                           <td className="px-6 py-4 font-medium text-[hsl(var(--foreground))]">
                             {row.title}
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={isOverdue ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--muted-foreground))]'}>
-                              {new Date(row.deadline).toLocaleDateString()}
-                              {isOverdue && ' (Overdue)'}
-                            </span>
                           </td>
                           <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
                             {formatDateTime(row.lastActiveAt)}

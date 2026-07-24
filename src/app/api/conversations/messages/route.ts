@@ -1,6 +1,7 @@
 import { db } from '@/db/db';
-import { chatMessages } from '@/db/schema';
+import { chatMessages, chatConversations, studentSessions } from '@/db/schema';
 import { eq, asc } from 'drizzle-orm';
+import { cookies } from 'next/headers';
 
 export async function POST(req: Request) {
   try {
@@ -8,6 +9,26 @@ export async function POST(req: Request) {
 
     if (!conversationId) {
       return new Response('Conversation ID is required', { status: 400 });
+    }
+
+    const cookieStore = await cookies();
+    const pid = cookieStore.get('participant_pid')?.value;
+    if (!pid) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    const conversation = await db.query.chatConversations.findFirst({
+      where: eq(chatConversations.id, conversationId),
+    });
+    if (!conversation) {
+      return new Response('Not found', { status: 404 });
+    }
+
+    const session = await db.query.studentSessions.findFirst({
+      where: eq(studentSessions.id, conversation.sessionId),
+    });
+    if (!session || session.participantToken !== pid) {
+      return new Response('Unauthorized', { status: 401 });
     }
 
     // Fetch all messages for this conversation, ordered by sequence

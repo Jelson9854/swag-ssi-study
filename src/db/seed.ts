@@ -17,7 +17,6 @@ Consider the following questions:
 - How can we maintain academic integrity while embracing technological assistance?
 
 Use the chatbot to help you brainstorm ideas, but make sure your final essay reflects your own critical thinking.`,
-    deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
     shareToken: 'test-assignment-123', // Fixed token for testing
     customSystemPrompt: DEFAULT_ASSIGNMENT_AI_GUIDANCE,
     includeInstructionInPrompt: false,

@@ -149,7 +149,6 @@ async function main() {
     id: assignmentId,
     title: seed.title,
     instructions: seed.instructions,
-    deadline: new Date(BASE_TIME),
     shareToken: seed.shareToken,
     instructorId: owner.id,
     // NIRVANA's chatbot ran with NO system prompt, so store an empty guidance

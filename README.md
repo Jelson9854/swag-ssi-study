@@ -1,48 +1,50 @@
-# SWAG
+# SWAG (Iowa fork)
 **Student Writing with Accountable Generative AI**
 
-A research tool for tracking and analyzing student writing processes with LLM assistance.
+A research tool for tracking and analyzing student writing processes with LLM assistance. This is a fork of the original SWAG project, adapted for a PID-based research study with no email/password signup and no assignment deadlines.
 
 ## Overview
 
-SWAG captures character-level writing interactions to help educators understand how students use LLM tools during writing assignments. The system records editing patterns, LLM conversations, and copy-paste behaviors, then provides an interactive replay interface for analysis.
+SWAG captures character-level writing interactions to help researchers understand how participants use LLM tools during writing tasks. The system records editing patterns, LLM conversations, and copy-paste behaviors, then provides an interactive replay interface for analysis.
 
 ## Key Features
 
-### Phase 1: Student Portal ✅
+### Participant Portal
+- ✅ **PID-based access** - Participants enter a Participant ID (PID) instead of signing up; the same PID resumes their existing sessions
 - ✅ **Character-level tracking** - BlockNote document snapshots every 5 steps or 10 seconds
 - ✅ **Rich text editor** - BlockNote with headings, lists, code blocks, and formatting
-- ✅ **ChatGPT-like interface** - Multiple conversation threads with editable titles
+- ✅ **Assignment chat** - One ongoing AI conversation per assignment, with a read-only dropdown to review chats from the participant's other assignments
 - ✅ **Copy-paste validation** - Detects and blocks external content, allows chatbot responses
 - ✅ **Auto-save** - Batched event storage every 30 seconds or 10 events
-- ✅ **Resizable split view** - Adjustable editor/chat panel widths (300-800px)
-- ✅ **Assignment instructions** - Toggleable view panel above editor
+- ✅ **Resizable split view** - Adjustable editor/chat panel widths, chat visibly bordered from the editor
+- ✅ **Assignment instructions** - Shown by default above the editor, can be hidden
 - ✅ **Real-time chat timestamps** - User messages saved immediately, not after AI response
+- ✅ **Always-open assignments** - No deadlines; assignments stay accessible until an assignment is manually removed
 
-### Phase 2: Instructor Portal ✅
-- ✅ **Email authentication** - One-time email verification, then email+password login
-- ✅ **Assignment management** - Create assignments with custom system prompts and deadlines
-- ✅ **Student progress dashboard** - View all student sessions with word counts and activity
+### Researcher Portal
+- ✅ **PID-based access** - A fixed allowlist of admin PIDs (`ADMIN_PIDS`) reaches the researcher dashboard; no login form
+- ✅ **Assignment management** - Create assignments with a default AI system prompt (editable per assignment)
+- ✅ **Participant progress dashboard** - View all participant sessions with word counts and activity
 - ✅ **Interactive replay** - Full-fidelity BlockNote rendering with all block types
 - ✅ **Conversation management** - View chat history alongside writing process
 - ✅ **Timeline visualization** - Chat messages, paste events, and typing activity markers
+- ✅ **SCORE** - Intent-based classification/rating layer for analyzing chat queries (see `docs/`)
 
 ## Tech Stack
 
 - **Framework**: Next.js 15 + React 19
 - **Editor**: BlockNote 0.42 (Notion-like UX)
-- **Chat**: Assistant UI + OpenAI API
-- **Database**: PostgreSQL
+- **Chat**: OpenAI API (default model: `gpt-5.6-luna`, configurable via `OPENAI_MODEL`)
+- **Database**: PostgreSQL (Neon, via Vercel)
 - **ORM**: Drizzle ORM
-- **Email**: Resend API
-- **Deployment**: Self-hosted (see `deploy.sh`)
+- **Deployment**: Vercel
 
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ or Bun 1.x
+- Node.js 18+
 - OpenAI API key
-- PostgreSQL database (production or local)
+- A PostgreSQL database (Neon recommended; see Vercel setup below)
 
 ### Installation
 
@@ -51,149 +53,73 @@ SWAG captures character-level writing interactions to help educators understand 
 npm install
 
 # Setup environment variables
-cp .env.example .env
-# Edit .env with your configuration
+cp .env.example .env.local
+# Edit .env.local with your configuration
 
-# Setup database (requires POSTGRES_URL in .env)
-npm run db:generate
-npm run db:migrate
+# Push the schema to your database (requires POSTGRES_URL / DATABASE_URL)
+npx drizzle-kit push
 
 # Start development server
 npm run dev
 ```
 
-### Local PostgreSQL with Docker Compose
-
-If your default `.env` points to a school/server database, use a local override so development always uses your own local PostgreSQL instance.
-
-```bash
-# 1) Start local PostgreSQL
-docker compose -f docker-compose.local.yml up -d
-
-# 2) Create local env override (Next.js loads .env.local first)
-cp .env.local.example .env.local
-# If 5432 is already in use, change .env.local to another port (e.g. 5433)
-
-# 3) Run migrations against local DB
-npm run db:migrate
-
-# 4) (Optional) seed test data
-npm run db:seed
-
-# 5) Start app
-npm run dev
-```
-
-To stop local PostgreSQL:
-
-```bash
-docker compose -f docker-compose.local.yml down
-```
+The dev server runs on **http://localhost:3030**.
 
 ### Environment Variables
 
-Copy `.env.example` to `.env` and update the values:
-
-```bash
-cp .env.example .env
-```
-
-Required variables:
-- `POSTGRES_URL` - PostgreSQL connection string
+Required variables (see `.env.example`):
+- `POSTGRES_URL` / `DATABASE_URL` - PostgreSQL connection string
 - `OPENAI_API_KEY` - Your OpenAI API key
+- `OPENAI_MODEL` - Chat model to use (e.g. `gpt-5.6-luna`)
 - `NEXT_PUBLIC_APP_URL` - Application URL
-- `JWT_SECRET` - Random secret for authentication (generate with `openssl rand -base64 32`)
-- `RESEND_API_KEY` - Resend API key for email verification
-- `EMAIL_FROM` - Sender email address (e.g., "SWAG <onboarding@resend.dev>")
-- `EMAIL_DOMAIN_RESTRICTION_ENABLED` - Set to `"false"` to temporarily allow signup from any email domain
-- `ALLOWED_EMAIL_DOMAINS` - Comma-separated allowed domains (e.g., "vt.edu")
-- `INSTRUCTOR_PASSCODE` - Passcode that creates instructor accounts during signup
-- `ADMINISTRATOR_PASSCODE` - Passcode that creates administrator accounts during signup
+- `ADMIN_PIDS` - Comma-separated list of PIDs that get researcher/admin access (e.g. `"jelson-admin,researcher2"`)
+- `SCORE_LLM_CONCURRENCY` - Max concurrent OpenAI calls for SCORE classification batches (optional, defaults to 32)
 
-**Email Configuration:**
-Using Resend (https://resend.com) for email verification:
-- **Development**: Verification links logged to console (no email sent)
-- **Production**:
-  - Sign up at Resend and get API key
-  - Use `onboarding@resend.dev` for testing (100 emails/day free)
-  - Verify your own domain for production use
+There is no email service, JWT secret, or password-related configuration in this fork — identity is entirely PID-based.
+
+### Deploying on Vercel
+
+1. Create a Vercel project linked to your fork of this repo.
+2. Add a Postgres database from the Storage tab (Neon-backed) — this auto-injects `POSTGRES_URL`/`DATABASE_URL` and related vars into your project's environment variables.
+3. Add the remaining variables above (`OPENAI_API_KEY`, `OPENAI_MODEL`, `ADMIN_PIDS`, `NEXT_PUBLIC_APP_URL`) via `vercel env add <NAME> <environment>` or the dashboard, for Production, Preview, and Development.
+4. Push the schema to the new database: `npx drizzle-kit push` (with `DATABASE_URL` set in your shell).
+5. Push to `main` — Vercel auto-deploys on every push once the GitHub repo is connected to the project.
 
 ### Accessing the Application
 
 **Root URL:**
-- `http://localhost:3030/` - Redirects to instructor login
+- `http://localhost:3030/` - PID entry screen
 
-**Instructor Portal:**
-- `http://localhost:3030/instructor/login` - Login/Signup page
-- `http://localhost:3030/instructor/dashboard` - Assignment dashboard
-- `http://localhost:3030/instructor/replay/[sessionId]` - Student session replay
+**Researcher / Admin:**
+- Enter a PID listed in `ADMIN_PIDS` at the root → routes to `/instructor/dashboard`
+- `http://localhost:3030/instructor/assignments/[id]/replay/[sessionId]` - Participant session replay
 
-**Student Portal:**
-- `http://localhost:3030/s/[shareToken]` - Assignment landing page
-- `http://localhost:3030/s/[shareToken]/editor` - Writing editor with AI chat
-
-**First-time instructors:**
-1. Go to `/instructor/login`
-2. Click "Sign Up" tab
-3. Enter your email address (`ALLOWED_EMAIL_DOMAINS` applies when `EMAIL_DOMAIN_RESTRICTION_ENABLED` is `"true"`)
-4. Enter the instructor or administrator passcode
-5. Check email for verification link (or console in development)
-6. Click link and set your password
-7. Auto-login after password setup
-
-Administrator accounts use the instructor portal and can view assignments and student sessions across all instructors. Editing and deleting remain limited to assignments owned by the signed-in account.
-
-**Returning instructors:**
-- Use "Login" tab with email + password
-- Session lasts 30 days (JWT cookie)
-
-## Production Deployment (Self-hosted)
-
-Use the provided deployment script to set up PostgreSQL, build the container, and configure Nginx:
-
-```bash
-# Make the script executable (first time only)
-chmod +x deploy.sh
-
-# Run deployment (optionally pass your domain)
-./deploy.sh swag.cs.vt.edu
-```
-
-The script will:
-- Initialize PostgreSQL (if needed)
-- Create database/user
-- Run migrations
-- Build and run the container via systemd
-- Configure Nginx + HTTPS placeholders
-
-After the script completes:
-1. Point your DNS to the server
-2. Run Certbot for SSL:
-   ```bash
-   sudo certbot --nginx -d swag.cs.vt.edu
-   ```
-3. Verify the app at `https://swag.cs.vt.edu`
+**Participant Portal:**
+- Enter any other PID at the root → routes to `/participant`, a list of all assignments
+- Selecting an assignment shows its instructions, then opens the editor with AI chat
+- The same PID always resumes that participant's existing sessions
 
 ## Project Structure
 
 ```
-swag/
+swag-ssi-study/
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                          # Root redirect to /instructor/login
-│   │   ├── s/[shareToken]/                   # Student portal
-│   │   │   ├── page.tsx                      # Assignment landing
-│   │   │   └── editor/page.tsx               # Writing interface
+│   │   ├── page.tsx                          # PID entry screen
+│   │   ├── participant/page.tsx              # Participant's assignment list
+│   │   ├── s/[shareToken]/                   # Assignment landing + editor
+│   │   │   ├── page.tsx                      # Instructions + continue button
+│   │   │   └── editor/[sessionId]/page.tsx   # Writing interface
 │   │   ├── instructor/
-│   │   │   ├── login/page.tsx                # Login/Signup
-│   │   │   ├── verify/                       # Email verification + password setup
-│   │   │   ├── dashboard/page.tsx            # Assignment list
-│   │   │   ├── assignments/[id]/page.tsx     # Student sessions
+│   │   │   ├── dashboard/page.tsx            # Assignment list (researcher)
+│   │   │   ├── assignments/[id]/page.tsx     # Participant sessions
+│   │   │   ├── assignments/[id]/score/       # SCORE viewer
 │   │   │   └── replay/[sessionId]/           # Replay viewer
 │   │   └── api/
-│   │       ├── auth/                         # Authentication endpoints
+│   │       ├── pid/                          # PID login/logout/me
 │   │       ├── chat/route.ts                 # OpenAI streaming chat
 │   │       ├── conversations/                # Chat CRUD operations
+│   │       ├── participant/assignments/      # Cross-assignment chat listing
 │   │       └── editor-events/save/route.ts   # Event batching endpoint
 │   ├── components/
 │   │   ├── editor/
@@ -201,34 +127,25 @@ swag/
 │   │   │   └── EditorClient.tsx              # Editor + chat split view
 │   │   └── chat/
 │   │       ├── ChatPanel.tsx                 # Chat container with conversations
+│   │       ├── AssignmentChatSwitcher.tsx    # Read-only cross-assignment chat dropdown
 │   │       └── ChatMessages.tsx              # Message rendering
 │   ├── lib/
 │   │   ├── event-tracker.ts                  # BlockNote transaction tracking
 │   │   ├── copy-validator.ts                 # Paste detection and validation
-│   │   ├── auth.ts                           # JWT session management
-│   │   └── password.ts                       # bcryptjs password hashing
+│   │   ├── auth.ts                           # PID-based identity resolution
+│   │   └── assignment-ai.ts                  # Default AI system prompt / guidance
 │   └── db/
 │       ├── schema.ts                         # PostgreSQL schema (Drizzle ORM)
 │       └── migrations/                       # SQL migration files
 ```
 
-## Development Status
-
-**Completed:**
-- ✅ Full-stack application with Next.js 15 + PostgreSQL
-- ✅ Student writing portal with AI chat assistance
-- ✅ Instructor dashboard with session replay
-- ✅ Email authentication with Resend
-- ✅ Real-time event tracking and replay
-- ✅ Copy-paste detection and prevention
-
-**Production Ready:**
-- ✅ Email verification for instructor signup
-- ✅ Session-based authentication (30-day cookies)
-- ✅ Environment variable configuration
-- ✅ Database migrations
-
 ## Architecture Highlights
+
+### PID-Based Identity
+- No passwords, email verification, or JWT sessions.
+- Admin PIDs are a fixed env-var allowlist (`ADMIN_PIDS`); any other PID is treated as a participant.
+- A participant's PID (`studentSessions.participantToken`) is the identity key — the same PID always resumes that participant's sessions, one row per `(assignment, PID)`.
+- Logout (available on both the participant and researcher headers) clears the PID cookie so a different PID can be entered.
 
 ### Document Tracking System
 **BlockNote Editor Integration:**
@@ -281,21 +198,26 @@ swag/
 - Pause/resume with keyboard shortcuts
 - Color-coded markers for chat, internal paste, external paste attempts
 
+### AI System Prompt
+- Each assignment has a `customSystemPrompt` field (required, defaults to a research-scenario prompt guiding the AI to support research/reasoning without generating arguments for the participant).
+- Researchers can override this per assignment when creating/editing it.
+- Optionally, the assignment's instructions can also be injected into the prompt via a checkbox.
 
 ## Database Management
 
 ```bash
-# Generate new migration after schema changes
-npm run db:generate
+# Push schema changes directly to the database (no migration files)
+npx drizzle-kit push
 
-# Apply migrations to database
-npm run db:migrate
+# Or generate a migration file first, then apply it
+npx drizzle-kit generate
+npx drizzle-kit migrate
 
 # View database in Vercel dashboard
 # Go to Storage → your database → Data tab
 
 # Or connect with psql locally
-psql $POSTGRES_URL
+psql $DATABASE_URL
 ```
 
 ## License

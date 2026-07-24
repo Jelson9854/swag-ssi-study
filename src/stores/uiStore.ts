@@ -32,7 +32,7 @@ export const useUIStore = create<UIState>()(
       isChatOpen: true,
       chatWidth: 480, // Default 480px
       isResizing: false,
-      showInstructions: false,
+      showInstructions: true,
       saveStatus: 'ready',
 
       // Simple actions

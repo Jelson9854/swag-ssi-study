@@ -1481,7 +1481,7 @@ export default function IntentBoard({
                           (r.pinnedIntents[selection.id] || ratingInfo?.stale) && (
                             <SmallChip
                               className="bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))]"
-                              title={r.pinnedIntents[selection.id] ? 'Set by instructor pin' : 'Needs re-rating'}
+                              title={r.pinnedIntents[selection.id] ? 'Set by researcher pin' : 'Needs re-rating'}
                             >
                               {r.pinnedIntents[selection.id] ? 'pinned' : 'stale'}
                             </SmallChip>
@@ -1502,7 +1502,7 @@ export default function IntentBoard({
                               <SmallChip
                                 key={iid}
                                 className={RATING_CHIP[eff]}
-                                title={pin ? 'Set by instructor pin' : undefined}
+                                title={pin ? 'Set by researcher pin' : undefined}
                               >
                                 {titleOf(iid)}: {RATING_LABELS[eff]}
                                 {pin ? ' · pinned' : ''}
@@ -1596,7 +1596,7 @@ export default function IntentBoard({
                       <SmallChip
                         key={i.id}
                         className="bg-emerald-50 text-emerald-700 border-emerald-200"
-                        title={pin ? 'Set by instructor pin' : rr?.rationale ?? undefined}
+                        title={pin ? 'Set by researcher pin' : rr?.rationale ?? undefined}
                       >
                         {i.title}
                         {pin ? ' · pinned' : ''}

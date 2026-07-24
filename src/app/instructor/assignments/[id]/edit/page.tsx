@@ -22,7 +22,6 @@ interface Assignment {
   title: string;
   instructions: string;
   criteria: string | null;
-  deadline: Date;
   instructorId: string | null;
   customSystemPrompt: string;
   includeInstructionInPrompt: boolean;
@@ -98,7 +97,6 @@ export default function EditAssignmentPage() {
       title: formData.get('title') as string,
       instructions: instructions, // Use state value from editor
       criteria: useCriteria && trimmedCriteria ? criteria : null,
-      deadline: formData.get('deadline') as string,
       customSystemPrompt: resolveAssignmentAiGuidance(formData.get('customSystemPrompt') as string | null),
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
@@ -140,9 +138,6 @@ export default function EditAssignmentPage() {
       </div>
     );
   }
-
-  // Format deadline for datetime-local input
-  const deadlineValue = new Date(assignment.deadline).toISOString().slice(0, 16);
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -248,21 +243,6 @@ export default function EditAssignmentPage() {
                 ) : null}
               </div>
 
-              {/* Deadline */}
-              <div className="space-y-2">
-                <label htmlFor="deadline" className="text-sm font-medium text-[hsl(var(--foreground))]">
-                  Deadline <span className="text-[hsl(var(--destructive))]">*</span>
-                </label>
-                <div className="w-full sm:w-1/2">
-                  <Input
-                    type="datetime-local"
-                    id="deadline"
-                    name="deadline"
-                    required
-                    defaultValue={deadlineValue}
-                  />
-                </div>
-              </div>
             </CardContent>
           </Card>
 

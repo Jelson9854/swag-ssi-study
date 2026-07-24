@@ -24,7 +24,6 @@ export default async function DashboardPage() {
     .select({
       id: assignments.id,
       title: assignments.title,
-      deadline: assignments.deadline,
       shareToken: assignments.shareToken,
       instructorId: assignments.instructorId,
       createdAt: assignments.createdAt,
@@ -81,7 +80,7 @@ export default async function DashboardPage() {
             <div>
               <h1 className="text-2xl font-bold font-heading text-[hsl(var(--foreground))]">SWAG</h1>
               <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                {isAdmin ? 'Administrator Dashboard' : 'Instructor Dashboard'}
+                {isAdmin ? 'Administrator Dashboard' : 'Researcher Dashboard'}
               </p>
             </div>
             <InstructorHeaderActions pid={instructor.id} />
@@ -128,14 +127,11 @@ export default async function DashboardPage() {
                       Title
                     </th>
                     <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                      Deadline
-                    </th>
-                    <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                       Students
                     </th>
                     {isAdmin && (
                       <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                        Instructor
+                        Researcher
                       </th>
                     )}
                     <th className="px-6 py-4 text-left text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
@@ -148,7 +144,6 @@ export default async function DashboardPage() {
                 </thead>
                 <tbody className="bg-[hsl(var(--card))] divide-y divide-[hsl(var(--border))]">
                   {assignmentWithCounts.map((assignment) => {
-                    const isOverdue = new Date(assignment.deadline) < new Date();
                     const shareUrl = `${baseUrl}/s/${assignment.shareToken}`;
 
                     return (
@@ -160,12 +155,6 @@ export default async function DashboardPage() {
                           >
                             {assignment.title}
                           </Link>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className={`text-sm ${isOverdue ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--muted-foreground))]'}`}>
-                            {new Date(assignment.deadline).toLocaleDateString()}
-                            {isOverdue && <span className="ml-2 text-xs font-medium">(Overdue)</span>}
-                          </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-2 text-sm text-[hsl(var(--foreground))]">
