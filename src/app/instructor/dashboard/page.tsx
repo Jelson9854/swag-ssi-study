@@ -16,7 +16,7 @@ export default async function DashboardPage() {
   const instructor = await getInstructor();
 
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   const isAdmin = isAdministrator(instructor);
@@ -84,7 +84,7 @@ export default async function DashboardPage() {
                 {isAdmin ? 'Administrator Dashboard' : 'Instructor Dashboard'}
               </p>
             </div>
-            <InstructorHeaderActions email={instructor.email} />
+            <InstructorHeaderActions pid={instructor.id} />
           </div>
         </div>
       </header>

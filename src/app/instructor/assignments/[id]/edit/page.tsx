@@ -49,11 +49,11 @@ export default function EditAssignmentPage() {
       try {
         const [res, meRes] = await Promise.all([
           fetch(`/api/assignments/${assignmentId}`),
-          fetch('/api/auth/me'),
+          fetch('/api/pid/me'),
         ]);
         if (!res.ok) {
           if (res.status === 401) {
-            router.push('/login');
+            router.push('/');
             return;
           }
           throw new Error('Failed to load assignment');

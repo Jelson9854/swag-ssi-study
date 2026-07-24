@@ -47,12 +47,14 @@ export const assignments = pgTable('assignments', {
 export const studentSessions = pgTable('student_sessions', {
   id: text('id').primaryKey(),
   assignmentId: text('assignment_id').notNull().references(() => assignments.id),
-  userId: text('user_id').references(() => instructors.id),
+  userId: text('user_id').references(() => instructors.id), // unused under PID auth; kept nullable for compatibility
+  // The participant's PID (typed at entry). Identity key for PID auth,
+  // scoped per assignment — one row per (assignmentId, participantToken).
   participantToken: text('participant_token').notNull().default(''),
-  studentFirstName: text('student_first_name').notNull(),
-  studentLastName: text('student_last_name').notNull(),
-  studentEmail: text('student_email').notNull(),
-  password: text('password'), // Hashed password (null if not verified yet)
+  studentFirstName: text('student_first_name').notNull().default(''),
+  studentLastName: text('student_last_name').notNull().default(''),
+  studentEmail: text('student_email').notNull().default(''),
+  password: text('password'), // unused under PID auth
   isVerified: boolean('is_verified').default(false).notNull(),
   startedAt: timestamp('started_at').notNull(),
   lastSavedAt: timestamp('last_saved_at'),
@@ -60,7 +62,12 @@ export const studentSessions = pgTable('student_sessions', {
   // Free-form per-session attributes (e.g. imported NIRVANA participant survey
   // scales, writer-profile groupings, readability, and aggregate metrics).
   metadata: jsonb('metadata'),
-});
+}, (table) => ({
+  assignmentTokenUnique: uniqueIndex('student_sessions_assignment_token_unique').on(
+    table.assignmentId,
+    table.participantToken
+  ),
+}));
 
 export const editorEvents = pgTable('editor_events', {
   id: serial('id').primaryKey(),

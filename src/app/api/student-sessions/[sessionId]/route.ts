@@ -1,28 +1,8 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { db } from '@/db/db';
-import { instructors, studentSessions, chatConversations, chatMessages, editorEvents, assignments } from '@/db/schema';
+import { studentSessions, chatConversations, chatMessages, editorEvents, assignments } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { isInstructorRole } from '@/lib/auth';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || !isInstructorRole(user.role)) {
-    return null;
-  }
-
-  return user;
-}
+import { getInstructor } from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ sessionId: string }>;
@@ -55,7 +35,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
-    console.log(`🗑️  Deleting student session: ${session.studentLastName}, ${session.studentFirstName} (${session.studentEmail})`);
+    console.log(`🗑️  Deleting student session: ${session.participantToken}`);
 
     // Get conversations for this session
     const conversations = await db
@@ -77,7 +57,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
     // Delete student session
     await db.delete(studentSessions).where(eq(studentSessions.id, sessionId));
 
-    console.log(`✅ Student session deleted: ${session.studentLastName}, ${session.studentFirstName}`);
+    console.log(`✅ Student session deleted: ${session.participantToken}`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

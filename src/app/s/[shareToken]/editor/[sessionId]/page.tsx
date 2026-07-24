@@ -70,18 +70,11 @@ export default async function EditorPage({ params }: EditorPageProps) {
     notFound();
   }
 
-  // Check if session is verified
-  if (!session.isVerified) {
-    // Redirect back to access page with error message
-    redirect(`/s/${shareToken}?error=not-verified`);
-  }
-
-  // Check if user has valid session cookie
+  // Check the participant's PID cookie matches the session's owner
   const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get(`student_session_${assignment.id}`);
+  const pid = cookieStore.get('participant_pid')?.value;
 
-  if (!sessionCookie || sessionCookie.value !== sessionId) {
-    // No valid session cookie - redirect to login
+  if (!pid || pid !== session.participantToken) {
     redirect(`/s/${shareToken}?error=login-required`);
   }
 

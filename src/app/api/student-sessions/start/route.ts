@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { db } from '@/db/db';
-import { assignments, instructors, studentSessions } from '@/db/schema';
+import { assignments, studentSessions } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { z } from 'zod';
 import crypto from 'crypto';
-import { generateNextParticipantToken } from '@/lib/participant-token';
 
 const startSchema = z.object({
   assignmentId: z.string().uuid().optional(),
@@ -15,17 +14,9 @@ const startSchema = z.object({
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
-    const userId = cookieStore.get('user_session')?.value;
+    const pid = cookieStore.get('participant_pid')?.value;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const user = await db.query.instructors.findFirst({
-      where: eq(instructors.id, userId),
-    });
-
-    if (!user || user.role !== 'student') {
+    if (!pid) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -47,7 +38,7 @@ export async function POST(request: Request) {
     const existingSession = await db.query.studentSessions.findFirst({
       where: and(
         eq(studentSessions.assignmentId, assignment.id),
-        eq(studentSessions.userId, user.id)
+        eq(studentSessions.participantToken, pid)
       ),
     });
 
@@ -55,28 +46,21 @@ export async function POST(request: Request) {
 
     if (!sessionId) {
       sessionId = crypto.randomUUID();
-      const participantToken = await generateNextParticipantToken(assignment.id);
       await db.insert(studentSessions).values({
         id: sessionId,
         assignmentId: assignment.id,
-        userId: user.id,
-        participantToken,
-        studentFirstName: user.firstName || '',
-        studentLastName: user.lastName || user.email,
-        studentEmail: user.email,
+        participantToken: pid,
         isVerified: true,
         startedAt: new Date(),
         lastSavedAt: null,
+        lastLoginAt: new Date(),
       });
+    } else {
+      await db
+        .update(studentSessions)
+        .set({ lastLoginAt: new Date() })
+        .where(eq(studentSessions.id, sessionId));
     }
-
-    cookieStore.set(`student_session_${assignment.id}`, sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: '/',
-    });
 
     return NextResponse.json({
       success: true,

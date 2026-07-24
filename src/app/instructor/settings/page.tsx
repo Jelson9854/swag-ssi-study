@@ -8,7 +8,7 @@ export default async function SettingsPage() {
   const instructor = await getInstructor();
 
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   return (
@@ -23,7 +23,7 @@ export default async function SettingsPage() {
             </div>
             <div className="flex items-center gap-4">
               <BackLink href="/instructor/dashboard" label="Back to Dashboard" />
-              <form action="/api/auth/logout" method="POST">
+              <form action="/api/pid/logout" method="POST">
                 <Button
                   type="submit"
                   variant="ghost"
@@ -47,28 +47,12 @@ export default async function SettingsPage() {
             </h2>
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Email</label>
-                <p className="text-[hsl(var(--foreground))]">{instructor.email}</p>
+                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">PID</label>
+                <p className="text-[hsl(var(--foreground))]">{instructor.id}</p>
               </div>
-              {(instructor.firstName || instructor.lastName) && (
-                <div>
-                  <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Name</label>
-                  <p className="text-[hsl(var(--foreground))]">{`${instructor.firstName || ''} ${instructor.lastName || ''}`.trim()}</p>
-                </div>
-              )}
               <div>
-                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Account Status</label>
-                <p className="text-[hsl(var(--foreground))]">
-                  {instructor.isVerified ? (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400">
-                      Verified
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
-                      Pending Verification
-                    </span>
-                  )}
-                </p>
+                <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Role</label>
+                <p className="text-[hsl(var(--foreground))] capitalize">{instructor.role}</p>
               </div>
               <div>
                 <label className="text-sm font-medium text-[hsl(var(--muted-foreground))]">Member Since</label>

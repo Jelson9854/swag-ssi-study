@@ -6,14 +6,14 @@ import { Settings, LogOut } from 'lucide-react';
 import Link from 'next/link';
 
 interface InstructorHeaderActionsProps {
-    email: string;
+    pid: string;
 }
 
-export default function InstructorHeaderActions({ email }: InstructorHeaderActionsProps) {
+export default function InstructorHeaderActions({ pid }: InstructorHeaderActionsProps) {
     return (
         <div className="flex items-center gap-2">
             <span className="text-sm text-[hsl(var(--muted-foreground))] mr-2 hidden sm:inline-block">
-                {email}
+                {pid}
             </span>
 
             {/* Settings */}
@@ -30,7 +30,7 @@ export default function InstructorHeaderActions({ email }: InstructorHeaderActio
             </Link>
 
             {/* Logout */}
-            <form action="/api/auth/logout" method="POST" className="inline-flex">
+            <form action="/api/pid/logout" method="POST" className="inline-flex">
                 <Button
                     type="submit"
                     variant="ghost"

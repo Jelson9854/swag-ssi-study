@@ -3,36 +3,40 @@ import { assignments, studentSessions, editorEvents } from '@/db/schema';
 import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
-import JoinAssignmentForm from '@/components/student/JoinAssignmentForm';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { cookies } from 'next/headers';
+import { Card } from '@/components/ui/card';
 import EmptyStateCard from '@/components/ui/EmptyStateCard';
 import { Button } from '@/components/ui/button';
-import DashboardHeaderActions from '@/components/student/DashboardHeaderActions';
-import { getStudent } from '@/lib/auth';
 
-export default async function StudentDashboardPage() {
-  const student = await getStudent();
+export default async function ParticipantAssignmentsPage() {
+  const cookieStore = await cookies();
+  const pid = cookieStore.get('participant_pid')?.value;
 
-  if (!student) {
-    redirect('/login');
+  if (!pid) {
+    redirect('/');
   }
 
-  const sessions = await db
+  const allAssignments = await db
     .select({
-      sessionId: studentSessions.id,
       assignmentId: assignments.id,
       title: assignments.title,
       deadline: assignments.deadline,
       shareToken: assignments.shareToken,
+    })
+    .from(assignments)
+    .orderBy(desc(assignments.createdAt));
+
+  // This participant's sessions, keyed by assignmentId, for Last Active / Last Submission.
+  const sessions = await db
+    .select({
+      sessionId: studentSessions.id,
+      assignmentId: studentSessions.assignmentId,
       startedAt: studentSessions.startedAt,
       lastLoginAt: studentSessions.lastLoginAt,
     })
     .from(studentSessions)
-    .innerJoin(assignments, eq(studentSessions.assignmentId, assignments.id))
-    .where(eq(studentSessions.userId, student.id))
-    .orderBy(desc(studentSessions.startedAt));
+    .where(eq(studentSessions.participantToken, pid));
 
-  // Single aggregate query for all submission timestamps instead of N+1
   const sessionIds = sessions.map(s => s.sessionId);
   const submissionTimes = sessionIds.length > 0
     ? await db
@@ -49,10 +53,17 @@ export default async function StudentDashboardPage() {
     : [];
 
   const submissionMap = new Map(submissionTimes.map(st => [st.sessionId, st.lastSubmissionAt]));
-  const sessionsWithActivity = sessions.map(session => ({
-    ...session,
-    lastSubmissionAt: submissionMap.get(session.sessionId) ?? null,
-  }));
+  const sessionByAssignment = new Map(sessions.map(s => [s.assignmentId, s]));
+
+  const rows = allAssignments.map(assignment => {
+    const session = sessionByAssignment.get(assignment.assignmentId);
+    return {
+      ...assignment,
+      sessionId: session?.sessionId ?? null,
+      lastActiveAt: session ? (session.lastLoginAt ?? session.startedAt) : null,
+      lastSubmissionAt: session ? (submissionMap.get(session.sessionId) ?? null) : null,
+    };
+  });
 
   const formatDateTime = (value: Date | null) => {
     if (!value) {
@@ -68,33 +79,23 @@ export default async function StudentDashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">SWAG</h1>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">Student Dashboard</p>
+              <p className="text-sm text-[hsl(var(--muted-foreground))]">Participant Dashboard</p>
             </div>
-            <DashboardHeaderActions email={student.email} />
+            <span className="text-sm text-[hsl(var(--muted-foreground))]">{pid}</span>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Join a new assignment</CardTitle>
-            <CardDescription>Enter a share link or token provided by your instructor</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <JoinAssignmentForm />
-          </CardContent>
-        </Card>
-
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold tracking-tight">Your Assignments</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Assignments</h2>
 
-          {sessionsWithActivity.length === 0 ? (
+          {rows.length === 0 ? (
             <EmptyStateCard
               minHeightClass="min-h-[160px]"
-              title="No assignments yet"
               titleClassName="text-base font-normal text-[hsl(var(--muted-foreground))]"
-              description="Join an assignment using the form above"
+              title="No assignments yet"
+              description="Check back once your researcher has created one."
               descriptionClassName="text-sm"
             />
           ) : (
@@ -121,27 +122,33 @@ export default async function StudentDashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[hsl(var(--border))]">
-                    {sessionsWithActivity.map((session) => (
-                      <tr key={session.sessionId} className="group hover:bg-[hsl(var(--muted)/0.3)] transition-colors">
-                        <td className="px-6 py-4 font-medium text-[hsl(var(--foreground))]">
-                          {session.title}
-                        </td>
-                        <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
-                          {new Date(session.deadline).toLocaleDateString()}
-                        </td>
-                        <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
-                          {formatDateTime(session.lastLoginAt ?? session.startedAt)}
-                        </td>
-                        <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
-                          {formatDateTime(session.lastSubmissionAt)}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <Link href={`/s/${session.shareToken}/editor/${session.sessionId}`}>
-                            <Button size="sm">Open</Button>
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                    {rows.map((row) => {
+                      const isOverdue = new Date(row.deadline) < new Date();
+                      return (
+                        <tr key={row.assignmentId} className="group hover:bg-[hsl(var(--muted)/0.3)] transition-colors">
+                          <td className="px-6 py-4 font-medium text-[hsl(var(--foreground))]">
+                            {row.title}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={isOverdue ? 'text-[hsl(var(--destructive))]' : 'text-[hsl(var(--muted-foreground))]'}>
+                              {new Date(row.deadline).toLocaleDateString()}
+                              {isOverdue && ' (Overdue)'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
+                            {formatDateTime(row.lastActiveAt)}
+                          </td>
+                          <td className="px-6 py-4 text-[hsl(var(--muted-foreground))]">
+                            {formatDateTime(row.lastSubmissionAt)}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <Link href={`/s/${row.shareToken}`}>
+                              <Button size="sm">{row.sessionId ? 'Continue' : 'Start'}</Button>
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

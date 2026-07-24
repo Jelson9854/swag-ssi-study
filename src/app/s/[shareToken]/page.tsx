@@ -1,8 +1,9 @@
 import { db } from '@/db/db';
 import { assignments } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { notFound } from 'next/navigation';
-import AccessForm from '@/components/student/AccessForm';
+import { notFound, redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import ContinueToEditorButton from '@/components/student/ContinueToEditorButton';
 import InstructionEditor from '@/components/editor/InstructionEditor';
 
 interface PageProps {
@@ -11,6 +12,13 @@ interface PageProps {
 
 export default async function AssignmentAccessPage({ params }: PageProps) {
   const { shareToken } = await params;
+
+  const cookieStore = await cookies();
+  const pid = cookieStore.get('participant_pid')?.value;
+
+  if (!pid) {
+    redirect('/');
+  }
 
   // Fetch assignment by share token
   const assignment = await db.query.assignments.findFirst({
@@ -87,12 +95,7 @@ export default async function AssignmentAccessPage({ params }: PageProps) {
           <InstructionEditor initialContent={assignment.instructions} editable={false} />
         </div>
 
-        <div>
-          <h2 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-4">
-            Enter Your Information
-          </h2>
-          <AccessForm assignmentId={assignment.id} shareToken={shareToken} />
-        </div>
+        <ContinueToEditorButton assignmentId={assignment.id} shareToken={shareToken} />
       </div>
     </div>
   );

@@ -213,7 +213,7 @@ export default function EditorClient({
       <header className="bg-[hsl(var(--card))] border-b border-[hsl(var(--border))] px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <BackLink href="/student/dashboard" label="Dashboard" className="text-[hsl(var(--muted-foreground))]" />
+            <BackLink href="/participant" label="Assignments" className="text-[hsl(var(--muted-foreground))]" />
             <div>
               <h1 className="text-xl font-bold text-[hsl(var(--foreground))]">
                 {assignmentTitle}
@@ -260,7 +260,7 @@ export default function EditorClient({
             {showLogoutConfirm ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-[hsl(var(--muted-foreground))]">Log out?</span>
-                <form action="/api/auth/logout" method="POST" className="inline-flex">
+                <form action="/api/pid/logout" method="POST" className="inline-flex">
                   <Button type="submit" variant="destructive" size="sm">Yes, log out</Button>
                 </form>
                 <Button variant="ghost" size="sm" onClick={() => setShowLogoutConfirm(false)}>Cancel</Button>

@@ -1,29 +1,9 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { db } from '@/db/db';
-import { assignments, instructors, studentSessions, editorEvents, chatConversations, chatMessages } from '@/db/schema';
+import { assignments, studentSessions, editorEvents, chatConversations, chatMessages } from '@/db/schema';
 import { resolveAssignmentAiGuidance } from '@/lib/assignment-ai';
 import { eq, and } from 'drizzle-orm';
-import { isAdministrator, isInstructorRole } from '@/lib/auth';
-
-async function getInstructor() {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get('user_session')?.value;
-
-  if (!userId) {
-    return null;
-  }
-
-  const user = await db.query.instructors.findFirst({
-    where: eq(instructors.id, userId),
-  });
-
-  if (!user || !isInstructorRole(user.role)) {
-    return null;
-  }
-
-  return user;
-}
+import { getInstructor, isAdministrator } from '@/lib/auth';
 
 interface RouteParams {
   params: Promise<{ id: string }>;

@@ -19,20 +19,19 @@ export default function DeleteAccountButton() {
     setIsDeleting(true);
 
     try {
-      const res = await fetch('/api/auth/delete-account', {
+      const res = await fetch('/api/instructor/delete-data', {
         method: 'DELETE',
       });
 
       if (res.ok) {
-        // Redirect to login page
-        router.push('/login?message=account-deleted');
+        router.push('/instructor/dashboard?message=data-deleted');
       } else {
         const data = await res.json();
-        alert(data.error || 'Failed to delete account');
+        alert(data.error || 'Failed to delete data');
         setIsDeleting(false);
       }
     } catch {
-      alert('Failed to delete account');
+      alert('Failed to delete data');
       setIsDeleting(false);
     }
   }
@@ -45,7 +44,7 @@ export default function DeleteAccountButton() {
             ⚠️ This action cannot be undone!
           </p>
           <p className="text-sm text-red-700 mb-4 dark:text-red-300">
-            Type <span className="font-mono font-bold">DELETE</span> to confirm account deletion:
+            Type <span className="font-mono font-bold">DELETE</span> to confirm deleting all your assignments and data:
           </p>
           <div className="mb-3">
             <Input
@@ -62,7 +61,7 @@ export default function DeleteAccountButton() {
               disabled={isDeleting || confirmText !== 'DELETE'}
               variant="destructive"
             >
-              {isDeleting ? 'Deleting...' : 'Delete My Account'}
+              {isDeleting ? 'Deleting...' : 'Delete My Data'}
             </Button>
             <Button
               onClick={() => {
@@ -85,7 +84,7 @@ export default function DeleteAccountButton() {
       onClick={() => setShowConfirm(true)}
       variant="destructive"
     >
-      Delete Account
+      Delete My Data
     </Button>
   );
 }

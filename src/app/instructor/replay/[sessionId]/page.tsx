@@ -17,7 +17,7 @@ export default async function ReplayPage({ params }: PageProps) {
   const instructor = await getInstructor();
 
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   // Get student session

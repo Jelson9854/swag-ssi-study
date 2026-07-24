@@ -34,7 +34,7 @@ export default async function ScorePage({ params }: PageProps) {
   const { id } = await params;
   const instructor = await getInstructor();
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   const assignment = await db.query.assignments.findFirst({
@@ -205,7 +205,7 @@ export default async function ScorePage({ params }: PageProps) {
             >
               v{intentState.versionNo}
             </span>
-            <InstructorHeaderActions email={instructor.email} />
+            <InstructorHeaderActions pid={instructor.id} />
           </div>
         </div>
       </header>

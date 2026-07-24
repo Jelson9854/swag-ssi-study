@@ -19,7 +19,7 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
   const instructor = await getInstructor();
 
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   const assignmentWhere = isAdministrator(instructor)
@@ -152,7 +152,7 @@ export default async function AssignmentDetailPage({ params }: PageProps) {
                   </Button>
                 </Link>
               )}
-              <InstructorHeaderActions email={instructor.email} />
+              <InstructorHeaderActions pid={instructor.id} />
             </div>
           </div>
         </div>

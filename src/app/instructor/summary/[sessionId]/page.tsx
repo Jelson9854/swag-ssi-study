@@ -17,7 +17,7 @@ export default async function ViewPage({ params }: PageProps) {
   const instructor = await getInstructor();
 
   if (!instructor) {
-    redirect('/login');
+    redirect('/');
   }
 
   // Get student session
