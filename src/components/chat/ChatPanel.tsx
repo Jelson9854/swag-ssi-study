@@ -73,6 +73,7 @@ function ChatPanel({
     setActiveConversationId,
     setInput,
     toggleWebSearch,
+    reset,
     loadConversations,
     loadMessages,
     createConversation,
@@ -114,18 +115,22 @@ function ChatPanel({
     }
   }, [mode, setMode, storeMode]);
 
-  // Load conversations on mount (live mode only)
+  // Load conversations on mount (live mode only). Reset first so a previous
+  // assignment's messages/conversations never render under the new session
+  // while the fetch for it is in flight.
   useEffect(() => {
     if (isReplayMode) {
       return;
     }
 
     if (sessionId) {
+      reset();
       loadConversations(sessionId);
     }
   }, [
     sessionId,
     isReplayMode,
+    reset,
     loadConversations,
   ]);
 

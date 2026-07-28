@@ -7,6 +7,7 @@ export const SWAG_CUSTOM_EVENTS = {
   SUBMIT_REQUEST: 'swag:submit-request',
   SUBMISSION_SAVED: 'swag:submission-saved',
   EDITOR_CHANGED: 'swag:editor-changed',
+  WORD_COUNT_CHANGED: 'swag:word-count-changed',
 } as const;
 
 export const getSwagSequenceStorageKey = (sessionId: string): string =>

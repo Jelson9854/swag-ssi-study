@@ -394,6 +394,14 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
     },
   }, [initialContent]);
 
+  // Report initial word count once the editor has loaded its starting content.
+  useEffect(() => {
+    if (!editor) return;
+    window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.WORD_COUNT_CHANGED, {
+      detail: { wordCount: countWords(editor.document) },
+    }));
+  }, [editor]);
+
   // Initialize event tracker
   useEffect(() => {
     trackerRef.current = getSessionEventTracker(sessionId);
@@ -644,6 +652,9 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
 
       // Notify that editor has changed (for submit button state)
       window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.EDITOR_CHANGED));
+      window.dispatchEvent(new CustomEvent(SWAG_CUSTOM_EVENTS.WORD_COUNT_CHANGED, {
+        detail: { wordCount: currentWordCount },
+      }));
 
       // Take snapshot if needed based on activity/interval thresholds.
       if (tracker.shouldTakeSnapshot()) {

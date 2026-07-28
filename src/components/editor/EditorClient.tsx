@@ -65,6 +65,7 @@ export default function EditorClient({
   const [hasChangesAfterSubmit, setHasChangesAfterSubmit] = useState(false);
   const [showCriteria, setShowCriteria] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [wordCount, setWordCount] = useState(0);
   const [panelHeight, setPanelHeight] = useState(280);
   const showInstructionsRef = useRef(showInstructions);
   useEffect(() => { showInstructionsRef.current = showInstructions; }, [showInstructions]);
@@ -174,6 +175,21 @@ export default function EditorClient({
     };
   }, []);
 
+  // Listen for live word count updates from the editor
+  useEffect(() => {
+    const handleWordCountChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ wordCount: number }>).detail;
+      if (detail && typeof detail.wordCount === 'number') {
+        setWordCount(detail.wordCount);
+      }
+    };
+
+    window.addEventListener(SWAG_CUSTOM_EVENTS.WORD_COUNT_CHANGED, handleWordCountChange);
+    return () => {
+      window.removeEventListener(SWAG_CUSTOM_EVENTS.WORD_COUNT_CHANGED, handleWordCountChange);
+    };
+  }, []);
+
   const handleOpenSubmissions = () => {
     loadSubmissions()
       .then(() => setIsSubmissionModalOpen(true))
@@ -238,6 +254,10 @@ export default function EditorClient({
                   <FileText className="w-4 h-4 mr-1" />
                   {showInstructions ? 'Hide Instructions' : 'View Instructions'}
                 </Button>
+                <span className="text-[hsl(var(--border))]">•</span>
+                <span className="text-[hsl(var(--muted-foreground))]">
+                  {wordCount} {wordCount === 1 ? 'word' : 'words'}
+                </span>
                 {hasCriteria ? (
                   <>
                     <span className="text-[hsl(var(--border))]">•</span>
