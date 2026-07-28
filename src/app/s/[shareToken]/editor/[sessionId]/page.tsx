@@ -51,6 +51,7 @@ export default async function EditorPage({ params }: EditorPageProps) {
       assignmentCriteria={assignment.criteria}
       allowWebSearch={assignment.allowWebSearch ?? false}
       strictPasteBlocking={assignment.strictPasteBlocking ?? false}
+      chatReadOnly={assignment.chatReadOnly ?? false}
     />
   );
 }

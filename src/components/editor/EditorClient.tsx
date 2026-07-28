@@ -26,6 +26,7 @@ interface EditorClientProps {
   assignmentCriteria: string | null;
   allowWebSearch: boolean;
   strictPasteBlocking: boolean;
+  chatReadOnly: boolean;
 }
 
 export default function EditorClient({
@@ -36,6 +37,7 @@ export default function EditorClient({
   assignmentCriteria,
   allowWebSearch,
   strictPasteBlocking,
+  chatReadOnly,
 }: EditorClientProps) {
   const validator = getGlobalValidator();
   const hasCriteria = Boolean(assignmentCriteria?.trim());
@@ -410,6 +412,7 @@ export default function EditorClient({
               isOpen={isChatOpen}
               onToggle={setChatOpen}
               allowWebSearch={allowWebSearch}
+              chatReadOnly={chatReadOnly}
             />
           </div>
         )}

@@ -133,6 +133,16 @@ export async function POST(req: Request) {
       });
     }
 
+    // Defense in depth: the client also disables sending, but a student could
+    // bypass that and hit this route directly.
+    if (assignment.chatReadOnly) {
+      return jsonError({
+        status: 403,
+        code: 'CHAT_READ_ONLY',
+        message: 'Your instructor has made this chat read-only.',
+      });
+    }
+
     // Shared with SCORE's rule previews (preview = runtime) — see
     // assignmentBasePrompt in assignment-ai.ts before changing.
     const basePrompt = assignmentBasePrompt(assignment);

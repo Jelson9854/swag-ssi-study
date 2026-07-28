@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       includeInstructionInPrompt,
       allowWebSearch,
       strictPasteBlocking,
+      chatReadOnly,
     } = body;
 
     // Validate required fields
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
       includeInstructionInPrompt: includeInstructionInPrompt || false,
       allowWebSearch: allowWebSearch || false,
       strictPasteBlocking: strictPasteBlocking || false,
+      chatReadOnly: chatReadOnly || false,
       createdAt: new Date(),
     });
 

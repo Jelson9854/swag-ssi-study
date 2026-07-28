@@ -40,6 +40,7 @@ export const assignments = pgTable('assignments', {
   includeInstructionInPrompt: boolean('include_instruction_in_prompt').default(false),
   allowWebSearch: boolean('allow_web_search').default(false),
   strictPasteBlocking: boolean('strict_paste_blocking').default(false),
+  chatReadOnly: boolean('chat_read_only').default(false),
   createdAt: timestamp('created_at').notNull(),
 });
 

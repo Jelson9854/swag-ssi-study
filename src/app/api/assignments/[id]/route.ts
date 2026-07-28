@@ -72,6 +72,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
       includeInstructionInPrompt,
       allowWebSearch,
       strictPasteBlocking,
+      chatReadOnly,
     } = body;
 
     // Validate required fields
@@ -93,6 +94,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
         includeInstructionInPrompt: includeInstructionInPrompt || false,
         allowWebSearch: allowWebSearch || false,
         strictPasteBlocking: strictPasteBlocking || false,
+        chatReadOnly: chatReadOnly || false,
       })
       .where(eq(assignments.id, id));
 

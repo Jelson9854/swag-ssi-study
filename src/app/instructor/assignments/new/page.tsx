@@ -41,6 +41,7 @@ export default function NewAssignmentPage() {
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
       strictPasteBlocking: formData.get('strictPasteBlocking') === 'on',
+      chatReadOnly: formData.get('chatReadOnly') === 'on',
     };
 
     try {

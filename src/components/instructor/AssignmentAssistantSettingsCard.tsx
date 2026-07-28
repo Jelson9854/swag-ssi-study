@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { Brain, Globe, Info } from 'lucide-react';
+import { Brain, Globe, Info, Lock } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -14,6 +14,7 @@ interface AssignmentAssistantSettingsCardProps {
   includeInstructionsDefaultChecked?: boolean;
   allowWebSearchDefaultChecked?: boolean;
   strictPasteBlockingDefaultChecked?: boolean;
+  chatReadOnlyDefaultChecked?: boolean;
 }
 
 export default function AssignmentAssistantSettingsCard({
@@ -21,11 +22,13 @@ export default function AssignmentAssistantSettingsCard({
   includeInstructionsDefaultChecked = false,
   allowWebSearchDefaultChecked = false,
   strictPasteBlockingDefaultChecked = false,
+  chatReadOnlyDefaultChecked = false,
 }: AssignmentAssistantSettingsCardProps) {
   const guidanceId = useId();
   const includeInstructionsId = useId();
   const allowWebSearchId = useId();
   const strictPasteBlockingId = useId();
+  const chatReadOnlyId = useId();
   const examplesPanelId = useId();
   const [showExamples, setShowExamples] = useState(false);
 
@@ -164,6 +167,30 @@ export default function AssignmentAssistantSettingsCard({
             <span className="mt-1 block text-xs font-semibold text-[hsl(var(--destructive))] opacity-80">
               Use this for assignments that require fully in-system drafting.
             </span>
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-4">
+          <div className="mb-2 flex items-center gap-3">
+            <input
+              type="checkbox"
+              id={chatReadOnlyId}
+              name="chatReadOnly"
+              defaultChecked={chatReadOnlyDefaultChecked}
+              className="h-4 w-4 rounded border-[hsl(var(--input))] bg-[hsl(var(--background))] text-[hsl(var(--primary))] focus:ring-[hsl(var(--ring))]"
+            />
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+              <label
+                htmlFor={chatReadOnlyId}
+                className="cursor-pointer select-none text-sm font-medium text-[hsl(var(--foreground))]"
+              >
+                Make Chat Read-Only
+              </label>
+            </div>
+          </div>
+          <p className="ml-7 text-sm text-[hsl(var(--muted-foreground))]">
+            Students can still view existing chat history but cannot send new messages to the AI assistant.
           </p>
         </div>
       </CardContent>

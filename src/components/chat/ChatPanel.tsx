@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { Button } from '@/components/ui/button';
-import { X, Globe, ChevronDown, Check, Sparkles } from 'lucide-react';
+import { X, Globe, ChevronDown, Check, Sparkles, Lock } from 'lucide-react';
 import { getGlobalValidator } from '@/lib/copy-validator';
 import { getSessionEventTracker } from '@/lib/event-tracker';
 import toast, { Toaster } from 'react-hot-toast';
@@ -19,6 +19,7 @@ interface ChatPanelProps {
   isOpen: boolean;
   onToggle: (isOpen: boolean) => void;
   allowWebSearch?: boolean;
+  chatReadOnly?: boolean;
   // Replay mode props
   mode?: 'live' | 'replay';
   replayConversations?: Conversation[];
@@ -43,6 +44,7 @@ function ChatPanel({
   isOpen,
   onToggle,
   allowWebSearch = false,
+  chatReadOnly = false,
   mode = 'live',
   replayConversations = [],
   replayMessages = [],
@@ -83,6 +85,7 @@ function ChatPanel({
   } = useChatStore();
 
   const isReplayMode = mode === 'replay';
+  const isChatReadOnly = !isReplayMode && chatReadOnly;
   const replayConversationsWithDate = useMemo(
     () => replayConversations.map((conversation) => ({
       ...conversation,
@@ -340,6 +343,7 @@ function ChatPanel({
   // Handle form submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isChatReadOnly) return;
     if (!input.trim() || isLoading || !activeConversationId || activeConversationId === 'all') return;
 
     trackChatInputState('', null, 'submit_clear');
@@ -393,6 +397,13 @@ function ChatPanel({
             </Button>
           </div>
         </div>
+
+        {isChatReadOnly && (
+          <div className="flex items-center gap-1.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 px-4 py-2 text-xs font-medium text-[hsl(var(--muted-foreground))]">
+            <Lock className="w-3.5 h-3.5" />
+            Your instructor has made this chat read-only. You can view history but not send new messages.
+          </div>
+        )}
 
         {/* Assignment switcher - view other assignments' chats read-only, live mode only */}
         {!isReplayMode && (
@@ -509,7 +520,7 @@ function ChatPanel({
                         }
                   }
                   onKeyDown={(e) => {
-                    if (isReplayMode) return;
+                    if (isReplayMode || isChatReadOnly) return;
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       if (input.trim() && activeConversationId && !isLoading) {
@@ -517,9 +528,9 @@ function ChatPanel({
                       }
                     }
                   }}
-                  placeholder="Ask for help with your essay..."
-                  readOnly={isReplayMode}
-                  disabled={!isReplayMode && (!activeConversationId || isLoading)}
+                  placeholder={isChatReadOnly ? 'The instructor has made this chat read-only.' : 'Ask for help with your essay...'}
+                  readOnly={isReplayMode || isChatReadOnly}
+                  disabled={!isReplayMode && (isChatReadOnly || !activeConversationId || isLoading)}
                   rows={1}
                   className="w-full bg-transparent resize-none outline-none text-base text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] disabled:text-[hsl(var(--muted-foreground))]"
                   style={{
@@ -535,8 +546,8 @@ function ChatPanel({
                   {allowWebSearch && (
                     <button
                       type="button"
-                      onClick={isReplayMode ? undefined : handleWebSearchToggle}
-                      disabled={isReplayMode}
+                      onClick={isReplayMode || isChatReadOnly ? undefined : handleWebSearchToggle}
+                      disabled={isReplayMode || isChatReadOnly}
                       aria-pressed={isWebSearchActive}
                       title={isWebSearchActive ? 'Turn off web search' : 'Turn on web search'}
                       className={`flex h-10 w-44 items-center justify-between rounded-full px-3 transition-colors ${
@@ -544,7 +555,7 @@ function ChatPanel({
                           ? 'bg-[hsl(var(--foreground))] text-[hsl(var(--background))] hover:bg-[hsl(var(--foreground))]/90'
                           : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--accent))] hover:text-[hsl(var(--foreground))]'
                       } ${
-                        isReplayMode ? 'cursor-default opacity-60 hover:bg-inherit hover:text-inherit' : ''
+                        isReplayMode || isChatReadOnly ? 'cursor-default opacity-60 hover:bg-inherit hover:text-inherit' : ''
                       }`}
                     >
                       <span className="flex items-center gap-2 whitespace-nowrap">
@@ -568,12 +579,13 @@ function ChatPanel({
                     type="submit"
                     disabled={
                       isReplayMode ||
+                      isChatReadOnly ||
                       !input.trim() ||
                       isLoading ||
                       !activeConversationId
                     }
                     className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
-                      !isReplayMode && input.trim() && activeConversationId && !isLoading
+                      !isReplayMode && !isChatReadOnly && input.trim() && activeConversationId && !isLoading
                       ? 'bg-[hsl(var(--foreground))] hover:bg-[hsl(var(--foreground))]/90 text-[hsl(var(--background))]'
                       : 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] cursor-not-allowed'
                     }`}

@@ -71,6 +71,13 @@
       "when": 1772839200000,
       "tag": "0009_assignment_ai_guidance_default",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1782950400000,
+      "tag": "0014_chat_read_only",
+      "breakpoints": true
     }
   ]
 }

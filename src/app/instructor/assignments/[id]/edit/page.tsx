@@ -27,6 +27,7 @@ interface Assignment {
   includeInstructionInPrompt: boolean;
   allowWebSearch: boolean;
   strictPasteBlocking: boolean;
+  chatReadOnly: boolean;
 }
 
 export default function EditAssignmentPage() {
@@ -72,6 +73,7 @@ export default function EditAssignmentPage() {
           includeInstructionInPrompt: Boolean(data.includeInstructionInPrompt),
           allowWebSearch: Boolean(data.allowWebSearch),
           strictPasteBlocking: Boolean(data.strictPasteBlocking),
+          chatReadOnly: Boolean(data.chatReadOnly),
         });
         setInstructions(data.instructions || '');
         setCriteria(data.criteria || '');
@@ -101,6 +103,7 @@ export default function EditAssignmentPage() {
       includeInstructionInPrompt: formData.get('includeInstructionInPrompt') === 'on',
       allowWebSearch: formData.get('allowWebSearch') === 'on',
       strictPasteBlocking: formData.get('strictPasteBlocking') === 'on',
+      chatReadOnly: formData.get('chatReadOnly') === 'on',
     };
 
     try {
@@ -251,6 +254,7 @@ export default function EditAssignmentPage() {
             includeInstructionsDefaultChecked={assignment.includeInstructionInPrompt}
             allowWebSearchDefaultChecked={assignment.allowWebSearch}
             strictPasteBlockingDefaultChecked={assignment.strictPasteBlocking}
+            chatReadOnlyDefaultChecked={assignment.chatReadOnly}
           />
 
           {/* Actions */}
