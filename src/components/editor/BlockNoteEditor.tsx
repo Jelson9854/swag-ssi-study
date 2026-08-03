@@ -305,7 +305,7 @@ const countDeletedWordsByOriginFromStepMap = (
   };
 };
 
-export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: BlockNoteEditorProps) {
+export default function BlockNoteEditor({ sessionId }: BlockNoteEditorProps) {
   const trackerRef = useRef<EventTracker | null>(null);
   const pendingTypingSourceRef = useRef<{ source: 'gpt'; setAt: number } | null>(null);
   const authorshipRangesRef = useRef<AuthorshipRange[]>([]);
@@ -701,23 +701,6 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
   useEffect(() => {
     if (!editor) return;
 
-    const blockExternalPaste = (e: ClipboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === "function") {
-        e.stopImmediatePropagation();
-      }
-
-      toast.error("External paste is blocked. You can only paste content from within this system.", {
-        duration: 4000,
-        position: "top-center",
-        style: {
-          background: "#EF4444",
-          color: "#fff",
-        },
-      });
-    };
-
     const handleCopy = () => {
       const copiedContent = window.getSelection()?.toString();
 
@@ -739,11 +722,6 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
             matchMethod: "none",
           });
         }
-
-        // In strict mode, non-text clipboard payloads are treated as external content and blocked.
-        if (strictPasteBlocking) {
-          blockExternalPaste(e);
-        }
         return;
       }
 
@@ -762,12 +740,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
         pendingTypingSourceRef.current = { source: "gpt", setAt: Date.now() };
       }
 
-      if (!classification.isInternal) {
-        // Allow external paste when strict blocking is disabled. Logs are still recorded.
-        if (strictPasteBlocking) {
-          blockExternalPaste(e);
-        }
-      } else {
+      if (classification.isInternal) {
         // Clear the copy buffer after successful paste
         validator.clearCopyBuffer();
       }
@@ -790,7 +763,7 @@ export default function BlockNoteEditor({ sessionId, strictPasteBlocking }: Bloc
       editorElement.removeEventListener("copy", handleCopy);
       editorElement.removeEventListener("paste", handlePaste as EventListener, true);
     };
-  }, [validator, editor, strictPasteBlocking]);
+  }, [validator, editor]);
 
   if (isLoading) {
     return (
